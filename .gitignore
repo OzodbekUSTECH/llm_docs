@@ -1,0 +1,14 @@
+.idea/
+venv/
+.env
+**/__pycache__/*
+*.pyc
+app/migrations/versions/*
+redis_data/
+postgres_data/
+logs/
+.env.prod
+.venv/
+.vscode/
+storage/*
+!storage/.gitkeep
