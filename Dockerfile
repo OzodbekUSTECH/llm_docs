@@ -9,17 +9,19 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Pillow, обрабатываешь	✅ libjpeg62-turbo, libpng16-16 если нужно будет
-
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Установка рабочей директории
 WORKDIR /code
 
+# Копируем и устанавливаем зависимости (кешируется отдельным слоем)
 COPY requirements.txt /code/
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 COPY . /code/
 
