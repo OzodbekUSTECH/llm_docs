@@ -1,7 +1,5 @@
 import hashlib
 import uuid
-import tempfile
-import io
 from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import UploadFile
@@ -14,10 +12,8 @@ from app.repositories.uow import UnitOfWork
 from app.utils.enums import DocumentStatus
 from app.exceptions.app_error import AppError
 from qdrant_client import AsyncQdrantClient
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from docling.document_converter import DocumentConverter
-from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling.chunking import HybridChunker
 
 
@@ -30,7 +26,6 @@ class CreateDocumentInteractor:
         qdrant_embeddings_repository: QdrantEmbeddingsRepository,
         sentence_transformer: SentenceTransformer,
         qdrant_client: AsyncQdrantClient,
-        langchain_splitter: RecursiveCharacterTextSplitter,
         document_converter: DocumentConverter,
         docling_chunker: HybridChunker
     ):
@@ -39,7 +34,6 @@ class CreateDocumentInteractor:
         self.qdrant_embeddings_repository = qdrant_embeddings_repository
         self.sentence_transformer = sentence_transformer
         self.qdrant_client = qdrant_client
-        self.langchain_splitter = langchain_splitter
         self.storage_dir = Path("storage/documents")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.document_converter = document_converter
@@ -392,13 +386,8 @@ class CreateDocumentInteractor:
         3. Учитывает токены, а не символы
         4. Объединяет маленькие соседние чанки
         
-        Fallback на langchain splitter если Docling chunker не работает.
         """
-        # Проверяем наличие Docling chunker
-        if self.docling_chunker is None:
-            print(f"⚠️ Docling chunker не инициализирован")
-            return self._fallback_to_langchain(docling_result)
-        
+       
         try:
             if not docling_result or not hasattr(docling_result, 'document'):
                 raise ValueError("Некорректный результат Docling")
@@ -466,45 +455,6 @@ class CreateDocumentInteractor:
             return chunks
             
         except Exception as e:
-            print(f"⚠️ Ошибка Docling HybridChunker: {e}")
-            import traceback
-            traceback.print_exc()
-            return self._fallback_to_langchain(docling_result)
+            raise AppError(400, "Не удалось разделить документ на чанки")
     
-    def _fallback_to_langchain(self, docling_result) -> List[str]:
-        """
-        Fallback метод: использует langchain splitter если Docling не работает.
-        """
-        print(f"🔄 Fallback: используем langchain RecursiveCharacterTextSplitter...")
-        
-        try:
-            # Извлекаем markdown текст
-            if hasattr(docling_result, 'document'):
-                markdown_text = docling_result.document.export_to_markdown()
-            else:
-                print(f"❌ Не удалось извлечь документ из результата")
-                return []
-            
-            if not markdown_text or not markdown_text.strip():
-                print(f"❌ Markdown контент пустой")
-                return []
-            
-            # Делим с помощью langchain
-            chunks = self.langchain_splitter.split_text(markdown_text)
-            
-            if chunks:
-                avg_size = sum(len(c) for c in chunks) / len(chunks)
-                print(f"✅ Langchain splitter:")
-                print(f"   ├─ Всего чанков: {len(chunks)}")
-                print(f"   ├─ Средний размер: {avg_size:.0f} символов")
-                print(f"   └─ Первые 3 размера: {[len(c) for c in chunks[:3]]}")
-                return chunks
-            
-            print(f"❌ Langchain splitter не создал чанки")
-            return []
-            
-        except Exception as e:
-            print(f"❌ Ошибка в fallback методе: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+   

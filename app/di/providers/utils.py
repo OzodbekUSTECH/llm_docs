@@ -5,7 +5,6 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import AsyncQdrantClient
 from transformers import AutoTokenizer
 from app.core.config import settings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from ollama import AsyncClient
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
@@ -45,31 +44,7 @@ class UtilsProvider(Provider):
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
         )
-    
-    @provide    
-    def provide_langchain_splitter(self) -> RecursiveCharacterTextSplitter:
-        """
-        Fallback chunker на случай если Docling HybridChunker не сработает.
-        Использует рекурсивное разделение по семантическим границам.
-        """
-        return RecursiveCharacterTextSplitter(
-            chunk_size=1500,  # Приблизительно ~512 токенов (1 токен ≈ 3 символа)
-            chunk_overlap=200,  # Перекрытие для сохранения контекста
-            length_function=len,
-            separators=[
-                "\n\n",  # Параграфы (приоритет 1)
-                "\n",    # Строки (приоритет 2)
-                ". ",    # Предложения с точкой (приоритет 3)
-                "! ",    # Восклицания (приоритет 4)
-                "? ",    # Вопросы (приоритет 5)
-                "; ",    # Точки с запятой (приоритет 6)
-                ", ",    # Запятые (приоритет 7)
-                " ",     # Пробелы (приоритет 8)
-                "",      # Символы (последний resort)
-            ],
-            is_separator_regex=False,
-        )
-    
+   
     @provide
     def provide_ollama_client(self) -> AsyncClient:
         """Создает клиент для Ollama LLM."""
