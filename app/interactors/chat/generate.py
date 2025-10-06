@@ -10,9 +10,18 @@ from ollama import AsyncClient
 
 from app.dto.chat import GenerateAnswerRequest, GeneratedAnswerResponse, ToolCall, Source
 from app.services.chat_storage import chat_storage
+from app.interactors.chat.system_prompts import STRICT_RAG_PROMPT
 
 # Хранилище истории для каждого чата
 chat_histories: Dict[str, List[Dict[str, Any]]] = {}
+
+# System prompt - используем строгий режим для минимизации галлюцинаций
+# Можно заменить на другие из system_prompts.py:
+# - BALANCED_PROMPT - сбалансированный (документы + общие знания)
+# - FRIENDLY_PROMPT - дружелюбный режим
+# - TECHNICAL_EXPERT_PROMPT - для технической документации
+# - RUSSIAN_STRICT_PROMPT - строгий режим на русском языке
+SYSTEM_PROMPT = STRICT_RAG_PROMPT
 
 class GenerateAnswerInteractor:
     """Интерактор для генерации ответов с использованием инструментов LLM"""
@@ -43,7 +52,12 @@ class GenerateAnswerInteractor:
         try:
             # Получаем или создаем историю для чата
             if chat_id not in chat_histories:
-                chat_histories[chat_id] = []
+                chat_histories[chat_id] = [
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT
+                    }
+                ]
             chat_history = chat_histories[chat_id]
             
             # Сохраняем сообщение пользователя
@@ -58,7 +72,8 @@ class GenerateAnswerInteractor:
             print(f"[CHAT] Processing message for chat {chat_id}: {request.message}")
             
             # Если это первое сообщение, будем генерировать название позже
-            is_first_message = len(chat_history) == 1
+            # System prompt (1) + user message (1) = 2 messages for first user interaction
+            is_first_message = len(chat_history) == 2
             
             # Agentic loop: allow multiple rounds of tool calling
             max_iterations = 5  # Prevent infinite loops
@@ -251,7 +266,12 @@ Title should be concise and capture the main topic. Respond with ONLY the title,
         try:
             # Получаем или создаем историю для чата
             if chat_id not in chat_histories:
-                chat_histories[chat_id] = []
+                chat_histories[chat_id] = [
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT
+                    }
+                ]
             chat_history = chat_histories[chat_id]
             
             # Сохраняем сообщение пользователя
@@ -266,7 +286,8 @@ Title should be concise and capture the main topic. Respond with ONLY the title,
             print(f"[CHAT] Processing message for chat {chat_id}: {request.message}")
             
             # Если это первое сообщение, будем генерировать название позже
-            is_first_message = len(chat_history) == 1
+            # System prompt (1) + user message (1) = 2 messages for first user interaction
+            is_first_message = len(chat_history) == 2
             
             # Send start event
             yield send_event('start', {
