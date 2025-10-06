@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     
     DOCS_USERNAME: str = "admin"
     DOCS_PASSWORD: str = "admin"
-
+    
+    OPENAI_API_KEY: str
 
     @property
     def database_url(self):

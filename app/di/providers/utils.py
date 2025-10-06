@@ -13,6 +13,7 @@ from docling.document_converter import PdfFormatOption
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling.chunking import HybridChunker
+from openai import AsyncOpenAI
 
 class UtilsProvider(Provider):
     """
@@ -128,3 +129,8 @@ class UtilsProvider(Provider):
             merge_peers=True,  # Объединяем соседние маленькие чанки
         )
     
+    
+    @provide
+    def provide_openai_client(self) -> AsyncOpenAI:
+        """Создает клиент для OpenAI."""
+        return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)

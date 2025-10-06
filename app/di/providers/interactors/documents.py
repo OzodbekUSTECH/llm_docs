@@ -4,6 +4,7 @@ from app.interactors.documents.create import CreateDocumentInteractor
 from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
 from app.interactors.chat.generate import GenerateAnswerInteractor
+from app.interactors.chat.openai_generate import OpenAIGenerateInteractor
 from app.interactors.documents.get import GetAllDocumentsInteractor, GetDocumentByIdInteractor
 
 
@@ -16,6 +17,7 @@ class DocumentsInteractorProvider(Provider):
         SearchDocumentsInteractor,
         DeleteDocumentInteractor,
         GenerateAnswerInteractor,
+        OpenAIGenerateInteractor,
         GetAllDocumentsInteractor,
         GetDocumentByIdInteractor
     )

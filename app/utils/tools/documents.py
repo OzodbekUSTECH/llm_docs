@@ -48,33 +48,34 @@ def _combine_sequential_chunks(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(combined)
 
 
-async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Search for relevant documents using semantic vector search. Returns document IDs and relevant chunks.
+    Search for relevant documents using semantic vector search. Returns document IDs and FULL relevant chunks.
     
-    IMPORTANT: This returns only CHUNKS of documents. To get FULL document content, 
-    use get_document_by_id with the 'id' field from search results.
+    IMPORTANT: This returns COMPLETE CHUNKS without truncation for maximum information quality.
+    To get FULL document content, use get_document_by_id with the 'id' field from search results.
 
     Use this tool to:
-    - Find documents matching a query (e.g., company names, owners, directors, contracts, etc.)
-    - Get relevant excerpts from documents
-    - Obtain document IDs for full content retrieval
+    - Find documents matching a query (e.g., company names, owners, directors, contracts, specifications, etc.)
+    - Get comprehensive relevant excerpts from documents with full context
+    - Obtain document IDs for full content retrieval if needed
 
     Arguments:
-        query (str): Natural language search query. Examples:
-            - "Floriana Impex owner" or "Floriana Impex director" or "Floriana Impex shareholders"
-            - "vessel name"
-            - "contract details"
-            - "company registration"
-        limit (int, optional): Maximum number of documents to return. Default is 5 (reduced to prevent overload).
+        query (str): Natural language search query. Be specific and descriptive. Examples:
+            - "Floriana Impex owner and directors information"
+            - "vessel technical specifications and capabilities"
+            - "contract terms, conditions and payment details"
+            - "company registration and legal entity information"
+        limit (int, optional): Maximum number of documents to return. Default is 10 for comprehensive results.
 
     Returns:
         List[Dict]: Each result contains:
             - id: Document UUID (use with get_document_by_id for full content)
             - filename: Document filename
-            - relevant_content: Combined relevant chunks from the document
-            - best_chunks: Individual matching chunks with similarity scores
+            - relevant_content: Combined FULL relevant chunks from the document (NO truncation)
+            - best_chunks: Individual matching chunks with similarity scores (COMPLETE chunks)
             - max_similarity: Highest similarity score (0-1, higher is better)
+            - chunks_count: Total number of relevant chunks found
     
     If no results found, returns empty list [].
     """
@@ -98,11 +99,11 @@ async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                 show_progress_bar=False
             )[0].tolist()
             
-            # Выполняем векторный поиск с умными параметрами
+            # Выполняем векторный поиск с улучшенными параметрами
             search_results = await qdrant_embeddings_repository.search_similar(
                 query_vector=query_vector,
-                limit=limit * 3,  # Получаем больше результатов для группировки
-                similarity_threshold=0.5,  # Средний порог для качественных результатов
+                limit=limit * 5,  # Получаем БОЛЬШЕ результатов для лучшего покрытия
+                similarity_threshold=0.4,  # НИЖЕ порог для более широкого поиска
                 document_id=None
             )
             
@@ -120,10 +121,9 @@ async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                         "filename": result.get("filename", ""),
                     }
                 
-                # ВАЖНО: Сохраняем ПОЛНЫЙ контент чанка для LLM
-                # Не обрезаем текст - LLM должен видеть весь контекст
+                # ВАЖНО: Сохраняем ПОЛНЫЙ контент чанка БЕЗ ОБРЕЗАНИЯ
                 documents_dict[doc_id]["chunks"].append({
-                    "content": result["chunk_content"],  # Полный контент
+                    "content": result["chunk_content"],  # ПОЛНЫЙ контент без truncation
                     "similarity": result["similarity"],
                     "chunk_index": result["chunk_index"]
                 })
@@ -152,16 +152,16 @@ async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                         key=lambda x: (-x["similarity"], x["chunk_index"])
                     )
                     
-                    # Берем топ чанки (максимум 3 для одного документа, чтобы не перегружать)
-                    best_chunks = doc_data["chunks"][:3]
+                    # Берем ТОП-5 чанков для одного документа (было 3, стало 5)
+                    best_chunks = doc_data["chunks"][:5]
                     
-                    # ВАЖНО: Ограничиваем размер контента для предотвращения перегрузки
+                    # ВАЖНО: НЕ обрезаем контент - возвращаем ПОЛНОСТЬЮ
                     # Объединяем чанки в один текст если они последовательные
                     combined_content = _combine_sequential_chunks(best_chunks)
                     
-                    # Ограничиваем длину контента (макс 3000 символов на документ)
-                    if len(combined_content) > 3000:
-                        combined_content = combined_content[:3000] + "\n\n[... content truncated for length ...]"
+                    # УБРАЛИ ограничение на 3000 символов - возвращаем ВСЁ
+                    # LLM достаточно умная, чтобы обработать больше информации
+                    # И это даст более полные и точные ответы
                     
                     results.append({
                         "id": doc_id,
@@ -170,11 +170,11 @@ async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
                         "created_at": doc.created_at.isoformat() if hasattr(doc, 'created_at') else None,
                         "max_similarity": round(doc_data["max_similarity"], 3),
                         "chunks_count": len(doc_data["chunks"]),
-                        "relevant_content": combined_content,  # Объединенный контент
+                        "relevant_content": combined_content,  # ПОЛНЫЙ объединенный контент
                         "best_chunks": [
                             {
-                                # Ограничиваем длину каждого чанка до 1000 символов
-                                "content": chunk["content"][:1000] + "..." if len(chunk["content"]) > 1000 else chunk["content"],
+                                # УБРАЛИ обрезание до 1000 символов - возвращаем ПОЛНОСТЬЮ
+                                "content": chunk["content"],  # ПОЛНЫЙ контент чанка
                                 "similarity": round(chunk["similarity"], 3),
                                 "chunk_index": chunk["chunk_index"]
                             }
@@ -186,15 +186,17 @@ async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
             results.sort(key=lambda x: x["max_similarity"], reverse=True)
             
             final_results = results[:limit]
-            print(f"[SEARCH] Returning {len(final_results)} documents:")
+            print(f"[SEARCH] Returning {len(final_results)} documents with FULL content:")
             for r in final_results:
                 print(f"  - {r['filename']} (similarity: {r['max_similarity']})")
-                print(f"    Content preview: {r['relevant_content'][:200]}...")
+                print(f"    Total content length: {len(r['relevant_content'])} chars")
+                print(f"    Chunks: {len(r['best_chunks'])}")
             
             return final_results
             
     except Exception as e:
-        return [{"error": f"Ошибка при поиске документов: {str(e)}"}]
+        print(f"[SEARCH ERROR] {str(e)}")
+        return [{"error": f"Error searching documents: {str(e)}"}]
 
 
 async def get_document_by_id(document_id: str) -> Dict[str, Any]:

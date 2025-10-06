@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Assistant</title>
+    <title>AI Chat Assistant - OpenAI RAG</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
     <style>
@@ -335,7 +335,7 @@
             white-space: pre;
         }
 
-        /* Pre-formatted текст из документов (простой текст без подсветки) */
+        /* Pre-formatted text from documents (plain text without syntax highlighting) */
         .message-text pre:not(:has(code)) {
             background: var(--code-bg);
             color: var(--text-primary);
@@ -1411,6 +1411,29 @@
             color: var(--text-secondary);
         }
 
+        .model-select {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            color: var(--text-primary);
+            background: var(--main-bg);
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            font-family: inherit;
+        }
+
+        .model-select:hover {
+            border-color: var(--accent-color);
+        }
+
+        .model-select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+        }
+
         .send-button {
             width: 40px;
             height: 40px;
@@ -1528,6 +1551,13 @@
 
             .chat-input-form {
                 padding: 0 12px;
+                flex-wrap: wrap;
+            }
+
+            .model-select {
+                order: -1;
+                width: 100%;
+                margin-bottom: 12px;
             }
         }
     </style>
@@ -1539,22 +1569,22 @@
             <div class="sidebar-header">
                 <button class="new-chat-btn" id="new-chat-btn">
                     <span style="font-size: 18px;">+</span>
-                    <span>Новый чат</span>
+                    <span>New Chat</span>
                 </button>
             </div>
             <div class="chats-list" id="chats-list">
-                <!-- Чаты загружаются динамически -->
+                <!-- Chats are loaded dynamically -->
             </div>
         </div>
 
         <!-- Main Chat Container -->
         <div class="chat-container">
             <div class="chat-header">
-                <div class="chat-title">AI Chat Assistant</div>
+                <div class="chat-title">🤖 AI Chat Assistant (OpenAI RAG)</div>
                 <div class="session-info">
-                    <a href="/documents" style="color: #10a37f; text-decoration: none; margin-right: 16px;">📚 Документы</a>
+                    <a href="/documents" style="color: #10a37f; text-decoration: none; margin-right: 16px;">📚 Documents</a>
                     <span style="margin-right: 16px;">👤 <span id="username">admin</span></span>
-                    <a href="#" id="logoutBtn" style="color: #ef4444; text-decoration: none;">🚪 Выход</a>
+                    <a href="#" id="logoutBtn" style="color: #ef4444; text-decoration: none;">🚪 Logout</a>
                 </div>
             </div>
 
@@ -1577,11 +1607,16 @@
                         <textarea 
                             class="chat-input" 
                             id="message-input" 
-                            placeholder="Напишите сообщение..."
+                            placeholder="Type your message..."
                             rows="1"
                             autocomplete="off"
                         ></textarea>
                     </div>
+                    <select id="model-select" class="model-select" title="Select OpenAI Model">
+                        <option value="gpt-4o-mini" selected>🚀 GPT-4o Mini (fast)</option>
+                        <option value="gpt-4o">⭐ GPT-4o (quality)</option>
+                        <option value="gpt-3.5-turbo">💰 GPT-3.5 Turbo (cheap)</option>
+                    </select>
                     <button type="submit" class="send-button" id="send-button">
                         <svg class="send-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -1632,6 +1667,7 @@
                 this.sessionIdElement = document.getElementById('session-id');
                 this.chatsList = document.getElementById('chats-list');
                 this.newChatBtn = document.getElementById('new-chat-btn');
+                this.modelSelect = document.getElementById('model-select');
             }
 
             bindEvents() {
@@ -1650,6 +1686,19 @@
                 this.newChatBtn.addEventListener('click', () => {
                     this.createNewChat();
                 });
+
+                // Сохраняем выбранную модель
+                this.modelSelect.addEventListener('change', () => {
+                    localStorage.setItem('selectedModel', this.modelSelect.value);
+                    console.log('Model changed to:', this.modelSelect.value);
+                });
+
+                // Восстанавливаем выбранную модель
+                const savedModel = localStorage.getItem('selectedModel');
+                if (savedModel) {
+                    this.modelSelect.value = savedModel;
+                    console.log('Restored model:', savedModel);
+                }
             }
 
             setupAutoResize() {
@@ -1737,7 +1786,8 @@
                  this.streamingChatId = this.currentChatId;
 
                 try {
-                    const response = await fetch(`/chat/generate?chat_id=${this.currentChatId}&stream=true`, {
+                    const selectedModel = this.modelSelect.value || 'gpt-4o-mini';
+                    const response = await fetch(`/chat/generate-openai?chat_id=${this.currentChatId}&model=${selectedModel}&stream=true`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -1760,7 +1810,7 @@
                         console.log('Request aborted (switched chat)');
                     } else {
                         console.error('Error:', error);
-                        this.addErrorMessage(`Ошибка: ${error.message}`);
+                        this.addErrorMessage(`Error: ${error.message}`);
                     }
                 } finally {
                     this.setStreaming(false);
@@ -1809,7 +1859,11 @@
                                              break;
                                              
                                          case 'iteration':
-                                             this.addToolCallEvent(toolCallsContainer, `🔄 Iteration ${event.iteration}/${event.max_iterations}`, 'iteration');
+                                             this.addToolCallEvent(toolCallsContainer, `🔄 Итерация ${event.iteration}/${event.max_iterations}`, 'iteration');
+                                             break;
+                                             
+                                         case 'thinking':
+                                             this.addToolCallEvent(toolCallsContainer, `💭 ${event.message}`, 'thinking');
                                              break;
                                              
                                          case 'tool_call_start':
@@ -1827,10 +1881,6 @@
                                              if (currentToolElement) {
                                                  this.updateToolCallStatus(currentToolElement, 'error', event.error);
                                              }
-                                             break;
-                                             
-                                         case 'thinking':
-                                             this.addToolCallEvent(toolCallsContainer, `💭 ${event.message}`, 'thinking');
                                              break;
                                              
                                          case 'content_start':
@@ -2019,15 +2069,15 @@
                          if (!this.currentAssistantMessage) {
                              this.currentAssistantMessage = this.createAssistantMessage();
                          }
-                         this.appendToAssistantMessageComplete('Извините, я не смог сгенерировать ответ. Попробуйте переформулировать вопрос.');
+                         this.appendToAssistantMessageComplete('Sorry, I couldn\'t generate a response. Please try rephrasing your question.');
                          this.finalizeMessage();
                     } else {
                         console.error('No content field in response:', data);
                         console.log('Available fields:', Object.keys(data));
-                        this.addErrorMessage('Ошибка: неверный формат ответа. Получено: ' + JSON.stringify(data));
+                        this.addErrorMessage('Error: invalid response format. Received: ' + JSON.stringify(data));
                     }
                     
-                    // Обновляем название чата через 2 секунды (чтобы LLM успел сгенерировать)
+                    // Update chat title after 2 seconds (to allow LLM to generate it)
                     if (this.currentChatId) {
                         setTimeout(() => {
                             this.refreshChatTitle(this.currentChatId);
@@ -2035,7 +2085,7 @@
                     }
                 } catch (error) {
                     console.error('Error processing response:', error);
-                    this.addErrorMessage('Ошибка обработки ответа: ' + error.message);
+                    this.addErrorMessage('Response processing error: ' + error.message);
                 }
             }
 
@@ -2047,47 +2097,47 @@
                         break;
 
                     case 'process_start':
-                        this.addProcessStep('process_start', 'Начало обработки', data.content);
+                        this.addProcessStep('process_start', 'Processing Started', data.content);
                         break;
 
                     case 'embedding_generation':
-                        this.addProcessStep('embedding', 'Создание эмбеддинга', data.content);
+                        this.addProcessStep('embedding', 'Generating Embedding', data.content);
                         break;
 
                     case 'search_start':
-                        this.addProcessStep('search', 'Поиск документов', data.content);
+                        this.addProcessStep('search', 'Document Search', data.content);
                         break;
 
                     case 'search_params':
-                        this.addProcessStep('search_params', 'Параметры поиска', data.content);
+                        this.addProcessStep('search_params', 'Search Parameters', data.content);
                         break;
 
                     case 'raw_search_results':
-                        this.addProcessStep('raw_results', 'Результаты поиска', data.content);
+                        this.addProcessStep('raw_results', 'Search Results', data.content);
                         break;
 
                     case 'filtering_start':
-                        this.addProcessStep('filtering', 'Фильтрация результатов', data.content);
+                        this.addProcessStep('filtering', 'Filtering Results', data.content);
                         break;
 
                     case 'search_results':
-                        this.addProcessStep('final_results', 'Финальные результаты', data.content);
+                        this.addProcessStep('final_results', 'Final Results', data.content);
                         break;
 
                     case 'context_building':
-                        this.addProcessStep('context', 'Формирование контекста', data.content);
+                        this.addProcessStep('context', 'Building Context', data.content);
                         break;
 
                     case 'context_ready':
-                        this.addProcessStep('context_ready', 'Контекст готов', data.content);
+                        this.addProcessStep('context_ready', 'Context Ready', data.content);
                         break;
 
                     case 'documents_info':
-                        this.addProcessStep('documents', 'Информация о документах', data.content);
+                        this.addProcessStep('documents', 'Document Information', data.content);
                         break;
 
                     case 'generation_start':
-                        this.addProcessStep('generation', 'Генерация ответа', data.content);
+                        this.addProcessStep('generation', 'Generating Response', data.content);
                         break;
 
                     case 'assistant_content':
@@ -2117,7 +2167,7 @@
                         break;
 
                     case 'tool_error':
-                        this.updateToolCall(data.name, `Ошибка: ${data.error}`, true);
+                        this.updateToolCall(data.name, `Error: ${data.error}`, true);
                         break;
 
                     case 'final_response_start':
@@ -2147,7 +2197,7 @@
                         break;
 
                     case 'error':
-                        this.addErrorMessage(`Ошибка поиска: ${data.content}`);
+                        this.addErrorMessage(`Search error: ${data.content}`);
                         break;
                 }
             }
@@ -2350,12 +2400,18 @@
                  // Show actions panel
                  aiActions.style.display = 'flex';
 
+                 // Format model name
+                 const modelName = data.model_used || 'N/A';
+                 const modelEmoji = modelName.includes('gpt-4o-mini') ? '🚀' : 
+                                  modelName.includes('gpt-4o') ? '⭐' : 
+                                  modelName.includes('gpt-3.5') ? '💰' : '🤖';
+
                  // Add metadata badge
                  const metadataBadge = document.createElement('div');
                  metadataBadge.className = 'action-badge process';
                  metadataBadge.innerHTML = `
-                     <span class="action-icon">ℹ️</span>
-                     <span>ID: ${data.message_id || 'N/A'} | Время: ${data.processing_time || 0}с | Модель: ${data.model_used || 'N/A'}</span>
+                     <span class="action-icon">${modelEmoji}</span>
+                     <span>${modelName} | ${data.processing_time || 0}s</span>
                  `;
                  aiActions.appendChild(metadataBadge);
              }
@@ -2372,7 +2428,7 @@
                      toolBadge.setAttribute('data-target', 'tools');
                      toolBadge.innerHTML = `
                          <span class="action-icon">🔧</span>
-                         <span>Инструменты (${toolCalls.length})</span>
+                         <span>Tools (${toolCalls.length})</span>
                      `;
                      
                      // Add click handler
@@ -2391,32 +2447,32 @@
                  toolSection.style.display = 'none';
                  toolSection.id = 'tools-section';
                  
-                 let toolHtml = '<div class="tool-call-header"><span>🔧 Использованные инструменты</span></div><div class="tool-call-content">';
+                 let toolHtml = '<div class="tool-call-header"><span>🔧 Tools Used</span></div><div class="tool-call-content">';
                  
                  toolCalls.forEach((tool, index) => {
                      const status = tool.success ? '✅' : '❌';
-                     const statusText = tool.success ? 'Успешно' : 'Ошибка';
+                     const statusText = tool.success ? 'Success' : 'Error';
                      
                      toolHtml += `
                          <div class="tool-call-item">
                              <div class="tool-call-name">${status} ${tool.name}</div>
                              <div class="tool-call-args">
-                                 <strong>Аргументы:</strong><br>
+                                 <strong>Arguments:</strong><br>
                                  <pre>${JSON.stringify(tool.arguments, null, 2)}</pre>
                              </div>
                              ${tool.output ? `
                                  <div class="tool-call-output">
-                                     <strong>Результат:</strong><br>
+                                     <strong>Result:</strong><br>
                                      <pre>${this.escapeHtml(tool.output.substring(0, 500))}${tool.output.length > 500 ? '...' : ''}</pre>
                                  </div>
                              ` : ''}
                              ${tool.error ? `
                                  <div class="tool-call-output" style="color: #dc2626;">
-                                     <strong>Ошибка:</strong> ${this.escapeHtml(tool.error)}
+                                     <strong>Error:</strong> ${this.escapeHtml(tool.error)}
                                  </div>
                              ` : ''}
                              <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                                 Статус: ${statusText}
+                                 Status: ${statusText}
                              </div>
                          </div>
                      `;
@@ -2656,10 +2712,10 @@
             addToolCall(name, args) {
                 if (!this.currentAssistantMessage) return;
                 
-                // Добавляем значок "Использовал инструменты"
-                this.addActionBadge('tools', '🔧', 'Использовал инструменты', 'tools');
+                // Add "Used tools" badge
+                this.addActionBadge('tools', '🔧', 'Used Tools', 'tools');
                 
-                // Создаем скрытую секцию для деталей инструментов
+                // Create hidden section for tool details
                 const messageContent = this.currentAssistantMessage.querySelector('.message-content');
                 const toolCallSection = document.createElement('div');
                 toolCallSection.className = 'tool-call-section';
@@ -2670,16 +2726,16 @@
                     <div class="tool-call-header">
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span>🔧</span>
-                            <span>Вызов инструмента: ${name}</span>
-                            <span class="tool-status" style="font-size: 11px; color: #007bff;">(выполняется...)</span>
+                            <span>Tool Call: ${name}</span>
+                            <span class="tool-status" style="font-size: 11px; color: #007bff;">(running...)</span>
                         </div>
                     </div>
                     <div class="tool-call-content">
-                        <div><strong>Аргументы:</strong></div>
+                        <div><strong>Arguments:</strong></div>
                         <div style="background: #f5f5f5; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px;">
                             ${this.escapeHtml(JSON.stringify(args, null, 2))}
                         </div>
-                        <div><strong>Результат:</strong> <span class="tool-result">Выполняется...</span></div>
+                        <div><strong>Result:</strong> <span class="tool-result">Running...</span></div>
                     </div>
                 `;
                 
@@ -2696,12 +2752,12 @@
                     const statusSpan = lastToolSection.querySelector('.tool-status');
                     
                     if (resultSpan) {
-                        resultSpan.textContent = isError ? `Ошибка: ${output}` : output;
+                        resultSpan.textContent = isError ? `Error: ${output}` : output;
                         resultSpan.style.color = isError ? '#dc2626' : '#1565c0';
                     }
                     
                     if (statusSpan) {
-                        statusSpan.textContent = isError ? '(ошибка)' : '(завершено)';
+                        statusSpan.textContent = isError ? '(error)' : '(completed)';
                         statusSpan.style.color = isError ? '#dc2626' : '#28a745';
                     }
                 }
@@ -3048,14 +3104,13 @@
              async testConnection() {
                  console.log('Testing connection...');
                  try {
-                     const response = await fetch('/chat/generate', {
+                     const response = await fetch('/chat/generate-openai?chat_id=test-123&model=gpt-4o-mini&stream=false', {
                          method: 'POST',
                          headers: {
                              'Content-Type': 'application/json',
                          },
                          body: JSON.stringify({
-                             message: 'test',
-                             stream: false
+                             message: 'test'
                          })
                      });
                      
@@ -3094,7 +3149,7 @@
                     } else {
                         console.log('[INIT] No chats found');
                         // Показываем приветствие
-                        this.addAssistantMessage('Привет! Я ваш AI ассистент. Чем могу помочь?');
+                        this.addAssistantMessage('Hello! I\'m your AI assistant. How can I help you?');
                     }
                 } catch (error) {
                     console.error('[INIT] Error initializing chats:', error);
@@ -3126,7 +3181,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include',
-                        body: JSON.stringify({ title: 'Новый чат' })
+                        body: JSON.stringify({ title: 'New Chat' })
                     });
                     
                     if (!response.ok) throw new Error('Failed to create chat');
@@ -3200,21 +3255,21 @@
                     } else {
                         console.log('[SWITCH] No messages in chat, showing welcome');
                         // Показываем приветствие для нового чата
-                        this.addAssistantMessage('Привет! Я ваш AI ассистент. Чем могу помочь?');
+                        this.addAssistantMessage('Hello! I\'m your AI assistant. How can I help you?');
                     }
                     
                     this.renderChats();
                     this.scrollToBottom();
                 } catch (error) {
                     console.error('Error switching chat:', error);
-                    this.addAssistantMessage('Привет! Я ваш AI ассистент. Чем могу помочь?');
+                    this.addAssistantMessage('Hello! I\'m your AI assistant. How can I help you?');
                 }
             }
 
             async deleteChat(chatId, event) {
                 event.stopPropagation();
                 
-                if (!confirm('Удалить этот чат?')) return;
+                if (!confirm('Delete this chat?')) return;
                 
                 try {
                     const response = await fetch(`/chats/${chatId}`, {
