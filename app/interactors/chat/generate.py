@@ -101,15 +101,24 @@ class GenerateAnswerInteractor:
                 iteration += 1
                 print(f"[CHAT] Agent iteration {iteration}/{max_iterations}")
                 
-                # LLM call with tools
-                response = await self.llm.chat(
-                    model=model_used,
-                    messages=chat_history,
-                    options={
-                        "temperature": 0  # Make responses more deterministic
-                    },
-                    tools=available_tools
-                )
+                # LLM call with tools (with timeout)
+                try:
+                    response = await asyncio.wait_for(
+                        self.llm.chat(
+                            model=model_used,
+                            messages=chat_history,
+                            options={
+                                "temperature": 0,  # Make responses more deterministic
+                                "num_ctx": 4096  # Limit context window to prevent memory issues
+                            },
+                            tools=available_tools
+                        ),
+                        timeout=60.0  # 60 second timeout
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[CHAT] LLM call timed out after 60 seconds")
+                    final_content = "Извините, обработка запроса заняла слишком много времени. Попробуйте упростить вопрос."
+                    break
                 
                 chat_history.append(response.message)
                 
@@ -155,6 +164,13 @@ class GenerateAnswerInteractor:
                             
                             # Add tool result to chat history with explicit instruction
                             tool_response = str(func_output)
+                            
+                            # Ограничиваем размер tool response для предотвращения перегрузки
+                            max_tool_response_length = 8000
+                            if len(tool_response) > max_tool_response_length:
+                                tool_response = tool_response[:max_tool_response_length] + "\n\n[... response truncated due to length ...]"
+                                print(f"[TOOL] Response truncated from {len(str(func_output))} to {max_tool_response_length} chars")
+                            
                             chat_history.append({
                                 'role': 'tool', 
                                 'content': f"TOOL OUTPUT - USE ONLY THIS INFORMATION:\n\n{tool_response}\n\nIMPORTANT: Base your answer ONLY on the information above. Do NOT add information from your training data.", 
@@ -338,32 +354,60 @@ Title should be concise and capture the main topic. Respond with ONLY the title,
                 response = None
                 content_started = False
                 
-                stream = await self.llm.chat(
-                    model=model_used,
-                    messages=chat_history,
-                    options={
-                        "temperature": 0
-                    },
-                    tools=available_tools,
-                    stream=True
-                )
+                # Streaming LLM call with timeout protection
+                try:
+                    stream = await asyncio.wait_for(
+                        self.llm.chat(
+                            model=model_used,
+                            messages=chat_history,
+                            options={
+                                "temperature": 0,
+                                "num_ctx": 4096  # Limit context window
+                            },
+                            tools=available_tools,
+                            stream=True
+                        ),
+                        timeout=5.0  # Short timeout just for initiating stream
+                    )
+                except asyncio.TimeoutError:
+                    print(f"[CHAT] Stream initialization timed out")
+                    final_content = "Извините, не удалось начать генерацию ответа. Попробуйте ещё раз."
+                    break
                 
-                async for chunk in stream:
-                    # Accumulate response
-                    response = chunk
-                    
-                    # Stream content if available
-                    if chunk.message.content:
-                        if not content_started:
-                            content_started = True
-                            yield send_event('content_start', {
-                                'message': 'Генерирую ответ...'
-                            })
+                chunk_count = 0
+                max_chunks = 500  # Limit to prevent infinite streams
+                
+                try:
+                    async for chunk in stream:
+                        chunk_count += 1
+                        if chunk_count > max_chunks:
+                            print(f"[CHAT] Max chunks limit reached ({max_chunks}), breaking stream")
+                            break
                         
-                        accumulated_content += chunk.message.content
-                        yield send_event('content_chunk', {
-                            'chunk': chunk.message.content
-                        })
+                        # Accumulate response
+                        response = chunk
+                        
+                        # Stream content if available
+                        if chunk.message.content:
+                            if not content_started:
+                                content_started = True
+                                yield send_event('content_start', {
+                                    'message': 'Генерирую ответ...'
+                                })
+                            
+                            accumulated_content += chunk.message.content
+                            
+                            # Limit accumulated content length
+                            if len(accumulated_content) > 10000:
+                                print(f"[CHAT] Accumulated content too long, stopping stream")
+                                break
+                            
+                            yield send_event('content_chunk', {
+                                'chunk': chunk.message.content
+                            })
+                except Exception as stream_error:
+                    print(f"[CHAT] Error during streaming: {stream_error}")
+                    # Continue processing with what we have
                 
                 # Check last chunk for tool calls
                 if response and response.message.tool_calls:
@@ -439,6 +483,13 @@ Title should be concise and capture the main topic. Respond with ONLY the title,
                             
                             # Add tool result to chat history with explicit instruction
                             tool_response = str(func_output)
+                            
+                            # Ограничиваем размер tool response для предотвращения перегрузки
+                            max_tool_response_length = 8000
+                            if len(tool_response) > max_tool_response_length:
+                                tool_response = tool_response[:max_tool_response_length] + "\n\n[... response truncated due to length ...]"
+                                print(f"[TOOL] Response truncated from {len(str(func_output))} to {max_tool_response_length} chars")
+                            
                             chat_history.append({
                                 'role': 'tool', 
                                 'content': f"TOOL OUTPUT - USE ONLY THIS INFORMATION:\n\n{tool_response}\n\nIMPORTANT: Base your answer ONLY on the information above. Do NOT add information from your training data.", 

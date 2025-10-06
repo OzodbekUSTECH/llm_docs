@@ -48,7 +48,7 @@ def _combine_sequential_chunks(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(combined)
 
 
-async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+async def search_documents(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """
     Search for relevant documents using semantic vector search. Returns document IDs and relevant chunks.
     
@@ -66,7 +66,7 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             - "vessel name"
             - "contract details"
             - "company registration"
-        limit (int, optional): Maximum number of results to return. Default is 10.
+        limit (int, optional): Maximum number of documents to return. Default is 5 (reduced to prevent overload).
 
     Returns:
         List[Dict]: Each result contains:
@@ -152,12 +152,16 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                         key=lambda x: (-x["similarity"], x["chunk_index"])
                     )
                     
-                    # Берем топ чанки (максимум 5 для одного документа)
-                    best_chunks = doc_data["chunks"][:5]
+                    # Берем топ чанки (максимум 3 для одного документа, чтобы не перегружать)
+                    best_chunks = doc_data["chunks"][:3]
                     
-                    # ВАЖНО: Возвращаем ПОЛНЫЙ контент для LLM
+                    # ВАЖНО: Ограничиваем размер контента для предотвращения перегрузки
                     # Объединяем чанки в один текст если они последовательные
                     combined_content = _combine_sequential_chunks(best_chunks)
+                    
+                    # Ограничиваем длину контента (макс 3000 символов на документ)
+                    if len(combined_content) > 3000:
+                        combined_content = combined_content[:3000] + "\n\n[... content truncated for length ...]"
                     
                     results.append({
                         "id": doc_id,
@@ -169,7 +173,8 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                         "relevant_content": combined_content,  # Объединенный контент
                         "best_chunks": [
                             {
-                                "content": chunk["content"],  # Полный контент без обрезки
+                                # Ограничиваем длину каждого чанка до 1000 символов
+                                "content": chunk["content"][:1000] + "..." if len(chunk["content"]) > 1000 else chunk["content"],
                                 "similarity": round(chunk["similarity"], 3),
                                 "chunk_index": chunk["chunk_index"]
                             }
