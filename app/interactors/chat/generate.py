@@ -15,6 +15,24 @@ from app.interactors.chat.system_prompts import STRICT_RAG_PROMPT
 # Хранилище истории для каждого чата
 chat_histories: Dict[str, List[Dict[str, Any]]] = {}
 
+
+def clear_chat_history(chat_id: str) -> None:
+    """Очищает историю чата (оставляет только system prompt)"""
+    if chat_id in chat_histories:
+        chat_histories[chat_id] = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            }
+        ]
+        print(f"[CHAT] History cleared for chat {chat_id}")
+
+
+def reset_all_chat_histories() -> None:
+    """Полностью очищает все истории чатов"""
+    chat_histories.clear()
+    print("[CHAT] All chat histories cleared")
+
 # System prompt - используем строгий режим для минимизации галлюцинаций
 # Можно заменить на другие из system_prompts.py:
 # - BALANCED_PROMPT - сбалансированный (документы + общие знания)
@@ -135,10 +153,11 @@ class GenerateAnswerInteractor:
                                                 chunk_index=chunk.get('chunk_index', 0)
                                             ))
                             
-                            # Add tool result to chat history
+                            # Add tool result to chat history with explicit instruction
+                            tool_response = str(func_output)
                             chat_history.append({
                                 'role': 'tool', 
-                                'content': str(func_output), 
+                                'content': f"TOOL OUTPUT - USE ONLY THIS INFORMATION:\n\n{tool_response}\n\nIMPORTANT: Base your answer ONLY on the information above. Do NOT add information from your training data.", 
                                 'tool_name': tool.function.name
                             })
                         else:
@@ -418,10 +437,11 @@ Title should be concise and capture the main topic. Respond with ONLY the title,
                                                 chunk_index=chunk.get('chunk_index', 0)
                                             ))
                             
-                            # Add tool result to chat history
+                            # Add tool result to chat history with explicit instruction
+                            tool_response = str(func_output)
                             chat_history.append({
                                 'role': 'tool', 
-                                'content': str(func_output), 
+                                'content': f"TOOL OUTPUT - USE ONLY THIS INFORMATION:\n\n{tool_response}\n\nIMPORTANT: Base your answer ONLY on the information above. Do NOT add information from your training data.", 
                                 'tool_name': tool.function.name
                             })
                         else:

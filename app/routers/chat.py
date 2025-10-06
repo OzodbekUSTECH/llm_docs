@@ -13,7 +13,7 @@ from app.dto.chat import GenerateAnswerRequest
 from app.interactors.documents.create import CreateDocumentInteractor
 from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
-from app.interactors.chat.generate import GenerateAnswerInteractor
+from app.interactors.chat.generate import GenerateAnswerInteractor, clear_chat_history
 
 
 router = APIRouter(
@@ -43,3 +43,19 @@ async def generate_answer(
         )
     else:
         return await generate_answer_interactor.execute(request, chat_id=chat_id)
+
+
+@router.post("/clear-history/{chat_id}")
+async def clear_history(chat_id: str):
+    """Очищает историю чата (удаляет все сообщения кроме system prompt)
+    
+    Используйте это когда:
+    - Модель начинает галлюцинировать
+    - Контекст загрязнен нерелевантной информацией
+    - Хотите начать новый разговор в том же чате
+    """
+    clear_chat_history(chat_id)
+    return {
+        "status": "success",
+        "message": f"История чата {chat_id} очищена. Начните новый разговор."
+    }

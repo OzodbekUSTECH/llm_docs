@@ -56,23 +56,31 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     use get_document_by_id with the 'id' field from search results.
 
     Use this tool to:
-    - Find documents matching a query
+    - Find documents matching a query (e.g., company names, owners, directors, contracts, etc.)
     - Get relevant excerpts from documents
     - Obtain document IDs for full content retrieval
 
     Arguments:
-        query (str): Natural language search query (e.g., "vessel name", "contract", "prices")
+        query (str): Natural language search query. Examples:
+            - "Floriana Impex owner" or "Floriana Impex director" or "Floriana Impex shareholders"
+            - "vessel name"
+            - "contract details"
+            - "company registration"
         limit (int, optional): Maximum number of results to return. Default is 10.
 
     Returns:
         List[Dict]: Each result contains:
             - id: Document UUID (use with get_document_by_id for full content)
             - filename: Document filename
-            - relevant_content: Combined relevant chunks
-            - best_chunks: Individual matching chunks
-            - max_similarity: Highest similarity score
+            - relevant_content: Combined relevant chunks from the document
+            - best_chunks: Individual matching chunks with similarity scores
+            - max_similarity: Highest similarity score (0-1, higher is better)
+    
+    If no results found, returns empty list [].
     """
     try:
+        print(f"[SEARCH] Query: '{query}', limit: {limit}")
+        
         async with app_container() as container:
             # Получаем зависимости
             documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
@@ -97,6 +105,8 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 similarity_threshold=0.5,  # Средний порог для качественных результатов
                 document_id=None
             )
+            
+            print(f"[SEARCH] Found {len(search_results)} raw chunks")
             
             # Группируем результаты по документам
             documents_dict = {}
@@ -170,7 +180,13 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             # Сортируем по максимальной схожести
             results.sort(key=lambda x: x["max_similarity"], reverse=True)
             
-            return results[:limit]
+            final_results = results[:limit]
+            print(f"[SEARCH] Returning {len(final_results)} documents:")
+            for r in final_results:
+                print(f"  - {r['filename']} (similarity: {r['max_similarity']})")
+                print(f"    Content preview: {r['relevant_content'][:200]}...")
+            
+            return final_results
             
     except Exception as e:
         return [{"error": f"Ошибка при поиске документов: {str(e)}"}]
