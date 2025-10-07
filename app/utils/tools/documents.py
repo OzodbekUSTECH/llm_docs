@@ -50,14 +50,11 @@ def _combine_sequential_chunks(chunks: List[Dict[str, Any]]) -> str:
 
 async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Search for relevant documents using semantic vector search. Returns document IDs and FULL relevant chunks.
+    Search for relevant documents using semantic vector search. Returns document IDs and relevant chunks.
     
-    IMPORTANT: This returns COMPLETE CHUNKS without truncation for maximum information quality.
-    To get FULL document content, use get_document_by_id with the 'id' field from search results.
-
     Use this tool to:
     - Find documents matching a query (e.g., company names, owners, directors, contracts, specifications, etc.)
-    - Get comprehensive relevant excerpts from documents with full context
+    - Get relevant excerpts from documents
     - Obtain document IDs for full content retrieval if needed
 
     Arguments:
@@ -66,14 +63,14 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             - "vessel technical specifications and capabilities"
             - "contract terms, conditions and payment details"
             - "company registration and legal entity information"
-        limit (int, optional): Maximum number of documents to return. Default is 10 for comprehensive results.
+        limit (int, optional): Maximum number of documents to return. Default is 10.
 
     Returns:
         List[Dict]: Each result contains:
-            - id: Document UUID (use with get_document_by_id for full content)
+            - id: Document UUID
             - filename: Document filename
-            - relevant_content: Combined FULL relevant chunks from the document (NO truncation)
-            - best_chunks: Individual matching chunks with similarity scores (COMPLETE chunks)
+            - relevant_content: Combined relevant chunks from the document
+            - best_chunks: Individual matching chunks with similarity scores
             - max_similarity: Highest similarity score (0-1, higher is better)
             - chunks_count: Total number of relevant chunks found
     
@@ -99,11 +96,11 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 show_progress_bar=False
             )[0].tolist()
             
-            # Выполняем векторный поиск с улучшенными параметрами
+            # Выполняем векторный поиск
             search_results = await qdrant_embeddings_repository.search_similar(
                 query_vector=query_vector,
-                limit=limit * 5,  # Получаем БОЛЬШЕ результатов для лучшего покрытия
-                similarity_threshold=0.4,  # НИЖЕ порог для более широкого поиска
+                limit=limit * 3,  # Получаем больше результатов для группировки
+                similarity_threshold=0.4,
                 document_id=None
             )
             
@@ -121,9 +118,13 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                         "filename": result.get("filename", ""),
                     }
                 
-                # ВАЖНО: Сохраняем ПОЛНЫЙ контент чанка БЕЗ ОБРЕЗАНИЯ
+                # Сохраняем контент чанка с ограничением длины
+                chunk_content = result["chunk_content"]
+                if len(chunk_content) > 1000:  # Ограничиваем длину чанка
+                    chunk_content = chunk_content[:1000] + "..."
+                
                 documents_dict[doc_id]["chunks"].append({
-                    "content": result["chunk_content"],  # ПОЛНЫЙ контент без truncation
+                    "content": chunk_content,
                     "similarity": result["similarity"],
                     "chunk_index": result["chunk_index"]
                 })
@@ -132,64 +133,48 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 if result["similarity"] > documents_dict[doc_id]["max_similarity"]:
                     documents_dict[doc_id]["max_similarity"] = result["similarity"]
             
-            # Получаем информацию о документах
-            document_ids = list(documents_dict.keys())
-            if document_ids:
-                documents = await documents_repository.get_all(
-                    where=[Document.id.in_(document_ids)]
-                )
-                documents_by_id = {str(doc.id): doc for doc in documents}
-            else:
-                documents_by_id = {}
-            
             # Формируем результат для LLM
             results = []
             for doc_id, doc_data in documents_dict.items():
-                doc = documents_by_id.get(doc_id)
-                if doc:
-                    # Сортируем чанки: сначала по схожести, потом по индексу
-                    doc_data["chunks"].sort(
-                        key=lambda x: (-x["similarity"], x["chunk_index"])
-                    )
-                    
-                    # Берем ТОП-5 чанков для одного документа (было 3, стало 5)
-                    best_chunks = doc_data["chunks"][:5]
-                    
-                    # ВАЖНО: НЕ обрезаем контент - возвращаем ПОЛНОСТЬЮ
-                    # Объединяем чанки в один текст если они последовательные
-                    combined_content = _combine_sequential_chunks(best_chunks)
-                    
-                    # УБРАЛИ ограничение на 3000 символов - возвращаем ВСЁ
-                    # LLM достаточно умная, чтобы обработать больше информации
-                    # И это даст более полные и точные ответы
-                    
-                    results.append({
-                        "id": doc_id,
-                        "filename": doc.original_filename,
-                        "content_type": doc.content_type,
-                        "created_at": doc.created_at.isoformat() if hasattr(doc, 'created_at') else None,
-                        "max_similarity": round(doc_data["max_similarity"], 3),
-                        "chunks_count": len(doc_data["chunks"]),
-                        "relevant_content": combined_content,  # ПОЛНЫЙ объединенный контент
-                        "best_chunks": [
-                            {
-                                # УБРАЛИ обрезание до 1000 символов - возвращаем ПОЛНОСТЬЮ
-                                "content": chunk["content"],  # ПОЛНЫЙ контент чанка
-                                "similarity": round(chunk["similarity"], 3),
-                                "chunk_index": chunk["chunk_index"]
-                            }
-                            for chunk in best_chunks
-                        ]
-                    })
+                # Сортируем чанки: сначала по схожести, потом по индексу
+                doc_data["chunks"].sort(
+                    key=lambda x: (-x["similarity"], x["chunk_index"])
+                )
+                
+                # Берем ТОП-3 чанка для одного документа
+                best_chunks = doc_data["chunks"][:3]
+                
+                # Объединяем чанки в один текст
+                combined_content = _combine_sequential_chunks(best_chunks)
+                
+                # Ограничиваем общую длину контента
+                if len(combined_content) > 2000:
+                    combined_content = combined_content[:2000] + "..."
+                
+                results.append({
+                    "id": doc_id,
+                    "filename": doc_data["filename"],
+                    "max_similarity": round(doc_data["max_similarity"], 3),
+                    "chunks_count": len(doc_data["chunks"]),
+                    "relevant_content": combined_content,
+                    "best_chunks": [
+                        {
+                            "content": chunk["content"],
+                            "similarity": round(chunk["similarity"], 3),
+                            "chunk_index": chunk["chunk_index"]
+                        }
+                        for chunk in best_chunks
+                    ]
+                })
             
             # Сортируем по максимальной схожести
             results.sort(key=lambda x: x["max_similarity"], reverse=True)
             
             final_results = results[:limit]
-            print(f"[SEARCH] Returning {len(final_results)} documents with FULL content:")
+            print(f"[SEARCH] Returning {len(final_results)} documents:")
             for r in final_results:
                 print(f"  - {r['filename']} (similarity: {r['max_similarity']})")
-                print(f"    Total content length: {len(r['relevant_content'])} chars")
+                print(f"    Content length: {len(r['relevant_content'])} chars")
                 print(f"    Chunks: {len(r['best_chunks'])}")
             
             return final_results
