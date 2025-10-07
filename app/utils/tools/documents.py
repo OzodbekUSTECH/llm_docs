@@ -76,27 +76,28 @@ async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
             # Группируем результаты по документам
             documents_dict = {}
             for result in search_results:
-                doc_id = result["document_id"]
+                # ScoredPoint объект имеет атрибуты: id, score, payload
+                doc_id = result.payload.get("document_id")
                 if doc_id not in documents_dict:
                     documents_dict[doc_id] = {
                         "document_id": doc_id,
                         "chunks": [],
                         "max_similarity": 0,
-                        "filename": result.get("filename", ""),
-                        "content_type": result.get("content_type", ""),
+                        "filename": result.payload.get("filename", ""),
+                        "content_type": result.payload.get("content_type", ""),
                     }
                 
                 # Сохраняем контент чанка
-                chunk_content = result["chunk_content"]
+                chunk_content = result.payload.get("chunk_content", "")
                 documents_dict[doc_id]["chunks"].append({
                     "content": chunk_content,
-                    "similarity": result["similarity"],
-                    "chunk_index": result["chunk_index"]
+                    "similarity": result.score,
+                    "chunk_index": result.payload.get("chunk_index", 0)
                 })
                 
                 # Обновляем максимальную схожесть
-                if result["similarity"] > documents_dict[doc_id]["max_similarity"]:
-                    documents_dict[doc_id]["max_similarity"] = result["similarity"]
+                if result.score > documents_dict[doc_id]["max_similarity"]:
+                    documents_dict[doc_id]["max_similarity"] = result.score
             
             # Формируем результат для LLM
             results = []
