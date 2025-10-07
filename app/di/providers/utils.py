@@ -8,7 +8,7 @@ from app.core.config import settings
 from ollama import AsyncClient
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
 from docling.document_converter import PdfFormatOption
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
@@ -23,8 +23,8 @@ class UtilsProvider(Provider):
     scope = Scope.APP
     
     # Константы для единообразия
-    EMBEDDING_MODEL = "intfloat/e5-large-v2"
-    EMBEDDING_DIMENSION = 1024  # e5-large-v2 имеет 1024 измерения
+    EMBEDDING_MODEL = "intfloat/e5-base-v2"
+    EMBEDDING_DIMENSION = 768  # e5-base-v2 имеет 768 измерения
     MAX_CHUNK_TOKENS = 512  # Максимум токенов в чанке
     CHUNK_OVERLAP_TOKENS = 64  # Перекрытие для контекста
     
@@ -70,16 +70,19 @@ class UtilsProvider(Provider):
         )
     
     @provide
-    def provide_pdf_pipeline_options(self, accelerator_options: AcceleratorOptions) -> PdfPipelineOptions:
+    def provide_pdf_pipeline_options(self) -> PdfPipelineOptions:
         """
         Настройки pipeline для обработки PDF.
         Включаем OCR и table structure для максимальной точности.
         """
         pipeline_options = PdfPipelineOptions()
-        pipeline_options.accelerator_options = accelerator_options
         pipeline_options.do_ocr = True  # Включаем OCR для отсканированных PDF
         pipeline_options.do_table_structure = True  # Извлекаем структуру таблиц
-        pipeline_options.table_structure_options.do_cell_matching = True  # Точное распознавание ячеек
+        pipeline_options.table_structure_options.do_cell_matching = True
+
+        ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True)
+        pipeline_options.ocr_options = ocr_options
+
         return pipeline_options
     
     @provide

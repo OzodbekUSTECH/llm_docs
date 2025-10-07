@@ -2,59 +2,22 @@
 Инструменты для работы с документами
 """
 from typing import List, Dict, Any, Optional
-from uuid import UUID
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.entities.documents import Document
 from app.di.containers import app_container
-from app.repositories.uow import UnitOfWork
 from sentence_transformers import SentenceTransformer
+from app.dto.ai_models import TextContent
+from app.dto.pagination import InfiniteScrollRequest
 
 
-def _combine_sequential_chunks(chunks: List[Dict[str, Any]]) -> str:
+async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
     """
-    Объединяет последовательные чанки в единый текст
-    
-    Args:
-        chunks: Список чанков с индексами
-        
-    Returns:
-        Объединенный текст
-    """
-    if not chunks:
-        return ""
-    
-    # Сортируем по chunk_index
-    sorted_chunks = sorted(chunks, key=lambda x: x["chunk_index"])
-    
-    # Объединяем текст
-    combined = []
-    prev_index = None
-    
-    for chunk in sorted_chunks:
-        current_index = chunk["chunk_index"]
-        content = chunk["content"]
-        
-        # Если чанки последовательные, просто добавляем
-        if prev_index is None or current_index == prev_index + 1:
-            combined.append(content)
-        else:
-            # Если пропуск, добавляем разделитель
-            combined.append("\n\n[...]\n\n")
-            combined.append(content)
-        
-        prev_index = current_index
-    
-    return "\n\n".join(combined)
-
-
-async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """
-    Search for relevant documents using semantic vector search. Returns document IDs and relevant chunks.
+    Search for relevant documents using semantic vector search. Returns formatted text with document information.
     
     Use this tool to:
     - Find documents matching a query (e.g., company names, owners, directors, contracts, specifications, etc.)
-    - Get relevant excerpts from documents
+    - Get relevant excerpts from documents with preview
     - Obtain document IDs for full content retrieval if needed
 
     Arguments:
@@ -66,22 +29,22 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         limit (int, optional): Maximum number of documents to return. Default is 10.
 
     Returns:
-        List[Dict]: Each result contains:
-            - id: Document UUID
-            - filename: Document filename
-            - relevant_content: Combined relevant chunks from the document
-            - best_chunks: Individual matching chunks with similarity scores
-            - max_similarity: Highest similarity score (0-1, higher is better)
-            - chunks_count: Total number of relevant chunks found
+        List[TextContent]: Formatted text containing:
+            - 📄 Found X documents matching 'query'
+            - For each document:
+                - **N. filename** - Document name
+                - 🆔 ID: document_id | 📊 Size: file_size bytes
+                - 📅 Uploaded: upload_date
+                - 👁️ Preview: text preview with key fragments
+                - ⭐ Relevance: score (0.0-1.0)
     
-    If no results found, returns empty list [].
+    If no results found, returns "No documents found matching query: 'query'".
     """
     try:
         print(f"[SEARCH] Query: '{query}', limit: {limit}")
         
         async with app_container() as container:
             # Получаем зависимости
-            documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
             qdrant_embeddings_repository: QdrantEmbeddingsRepository = await container.get(QdrantEmbeddingsRepository)
             sentence_transformer: SentenceTransformer = await container.get(SentenceTransformer)
             
@@ -92,8 +55,7 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 [query_with_prefix], 
                 convert_to_numpy=True,
                 normalize_embeddings=True,
-                batch_size=1,
-                show_progress_bar=False
+                show_progress_bar=False,
             )[0].tolist()
             
             # Выполняем векторный поиск
@@ -101,10 +63,15 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 query_vector=query_vector,
                 limit=limit * 3,  # Получаем больше результатов для группировки
                 similarity_threshold=0.4,
-                document_id=None
             )
             
             print(f"[SEARCH] Found {len(search_results)} raw chunks")
+            
+            if not search_results:
+                return [TextContent(
+                    type="text",
+                    text=f"No documents found matching query: '{query}'"
+                )]
             
             # Группируем результаты по документам
             documents_dict = {}
@@ -116,13 +83,11 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                         "chunks": [],
                         "max_similarity": 0,
                         "filename": result.get("filename", ""),
+                        "content_type": result.get("content_type", ""),
                     }
                 
-                # Сохраняем контент чанка с ограничением длины
+                # Сохраняем контент чанка
                 chunk_content = result["chunk_content"]
-                if len(chunk_content) > 1000:  # Ограничиваем длину чанка
-                    chunk_content = chunk_content[:1000] + "..."
-                
                 documents_dict[doc_id]["chunks"].append({
                     "content": chunk_content,
                     "similarity": result["similarity"],
@@ -141,63 +106,73 @@ async def search_documents(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                     key=lambda x: (-x["similarity"], x["chunk_index"])
                 )
                 
-                # Берем ТОП-3 чанка для одного документа
+                # Берем ТОП-3 чанка для превью
                 best_chunks = doc_data["chunks"][:3]
                 
-                # Объединяем чанки в один текст
-                combined_content = _combine_sequential_chunks(best_chunks)
+                # Создаем превью из лучших чанков
+                preview_parts = []
+                for chunk in best_chunks:
+                    content = chunk["content"]
+                    if len(content) > 200:  # Ограничиваем превью
+                        content = content[:200] + "..."
+                    preview_parts.append(content)
                 
-                # Ограничиваем общую длину контента
-                if len(combined_content) > 2000:
-                    combined_content = combined_content[:2000] + "..."
+                preview_text = " | ".join(preview_parts)
+                
+                # Подсчитываем примерный размер файла
+                total_chunk_length = sum(len(chunk["content"]) for chunk in doc_data["chunks"])
                 
                 results.append({
-                    "id": doc_id,
-                    "filename": doc_data["filename"],
-                    "max_similarity": round(doc_data["max_similarity"], 3),
-                    "chunks_count": len(doc_data["chunks"]),
-                    "relevant_content": combined_content,
-                    "best_chunks": [
-                        {
-                            "content": chunk["content"],
-                            "similarity": round(chunk["similarity"], 3),
-                            "chunk_index": chunk["chunk_index"]
-                        }
-                        for chunk in best_chunks
-                    ]
+                    "filename": doc_data["filename"],  # 📄 Название файла
+                    "id": doc_id,  # 🆔 ID документа
+                    "file_size": total_chunk_length,  # 📊 Размер файла в байтах
+                    "uploaded_at": "N/A",  # 📅 Дата загрузки (не доступна из Qdrant)
+                    "preview": preview_text,  # 👁️ Превью текста
+                    "relevance_score": round(doc_data["max_similarity"], 3),  # ⭐ Релевантность
+                    "content_type": doc_data["content_type"],  # Тип контента
+                    "chunks_count": len(doc_data["chunks"]),  # Количество найденных чанков
                 })
             
-            # Сортируем по максимальной схожести
-            results.sort(key=lambda x: x["max_similarity"], reverse=True)
+            # Сортируем по релевантности
+            results.sort(key=lambda x: x["relevance_score"], reverse=True)
             
-            final_results = results[:limit]
-            print(f"[SEARCH] Returning {len(final_results)} documents:")
-            for r in final_results:
-                print(f"  - {r['filename']} (similarity: {r['max_similarity']})")
-                print(f"    Content length: {len(r['relevant_content'])} chars")
-                print(f"    Chunks: {len(r['best_chunks'])}")
+          
             
-            return final_results
+            # Форматируем результат для LLM
+            response = f"📄 Found {len(results)} documents matching '{query}':\n\n"
+            
+            for i, doc in enumerate(results, 1):
+                response += f"**{i}. {doc['filename']}**\n"
+                response += f"   🆔 ID: {doc['id']} | 📊 Size: {doc['file_size']:,} bytes\n"
+                response += f"   📅 Uploaded: {doc['uploaded_at']}\n"
+                response += f"   👁️ Preview: {doc['preview']}\n"
+                response += f"   ⭐ Relevance: {doc['relevance_score']:.3f}\n\n"
+            
+            return [TextContent(type="text", text=response)]
             
     except Exception as e:
         print(f"[SEARCH ERROR] {str(e)}")
-        return [{"error": f"Error searching documents: {str(e)}"}]
+        return [TextContent(
+            type="text",
+            text=f"Error searching documents: {str(e)}"
+        )]
 
 
-async def get_document_by_id(document_id: str) -> Dict[str, Any]:
+async def get_document_by_id(document_id: str, include_content: bool = False) -> List[TextContent]:
     """
-    Get full document content by document ID.
+    Get document information by document ID.
     
     Use this tool when you need:
-    - Full document content (not just chunks)
-    - Complete tables and structured data
-    - All metadata of a specific document
+    - Document metadata and basic information
+    - Truncated content preview (if include_content=True)
+    - Document status and properties
     
     Args:
         document_id: The unique ID of the document (UUID string from search results)
+        include_content: If True, includes truncated content preview (max 2000 chars)
         
     Returns:
-        Complete document information including full content, tables, and metadata
+        List[TextContent]: Formatted document information
     """
     try:
         async with app_container() as container:
@@ -209,76 +184,300 @@ async def get_document_by_id(document_id: str) -> Dict[str, Any]:
             )
             
             if not document:
-                return {"error": f"Document with ID {document_id} not found"}
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Document with ID {document_id} not found"
+                )]
             
-            return {
-                "id": str(document.id),
-                "filename": document.original_filename,
-                "content_type": document.content_type,
-                "status": document.status.value if hasattr(document.status, 'value') else str(document.status),
-                "full_content": document.content,
-                "tables": document.tables or [],
-                "doc_metadata": {},
-                "created_at": document.created_at.isoformat() if hasattr(document, 'created_at') else None,
-                "content_length": len(document.content) if document.content else 0,
-                "file_hash": document.file_hash,
-                "description": f"Full content of '{document.original_filename}' ({len(document.content) if document.content else 0} characters)"
-            }
+            # Формируем базовую информацию
+            content_length = len(document.content) if document.content else 0
+            status = document.status.value if hasattr(document.status, 'value') else str(document.status)
+            created_at = document.created_at.isoformat() if hasattr(document, 'created_at') else "N/A"
+            
+            response = f"📄 **Document Information**\n\n"
+            response += f"**Filename:** {document.original_filename}\n"
+            response += f"**ID:** {document_id}\n"
+            response += f"**Content Type:** {document.content_type}\n"
+            response += f"**Status:** {status}\n"
+            response += f"**Content Length:** {content_length:,} characters\n"
+            response += f"**File Hash:** {document.file_hash}\n"
+            response += f"**Created At:** {created_at}\n"
+            
+            if include_content and document.content:
+                # Добавляем обрезанный контент
+                truncated_content = document.content
+                if len(truncated_content) > 2000:
+                    truncated_content = truncated_content[:2000] + "..."
+                
+                response += f"\n**Content Preview:**\n"
+                response += f"```\n{truncated_content}\n```\n"
+                response += f"\n*Note: Content is truncated to 2000 characters. Use get_document_full_content for complete content.*"
+            else:
+                response += f"\n*Use get_document_full_content to retrieve the complete document content.*"
+            
+            return [TextContent(type="text", text=response)]
             
     except Exception as e:
-        return {"error": f"Error retrieving document: {str(e)}"}
+        return [TextContent(
+            type="text",
+            text=f"❌ Error retrieving document: {str(e)}"
+        )]
 
 
-async def list_documents(limit: int = 20) -> List[Dict[str, Any]]:
+async def get_document_full_content(document_id: str, chunk_size: int = 3000, chunk_index: int = 0) -> List[TextContent]:
     """
-    Список всех документов
+    Get full document content in chunks for LLM processing.
+    
+    Use this tool when you need:
+    - Complete document content (not truncated)
+    - Large documents that need to be processed in parts
+    - Full text analysis and processing
     
     Args:
-        limit: Максимальное количество документов
+        document_id: The unique ID of the document (UUID string from search results)
+        chunk_size: Size of each content chunk in characters (default: 3000)
+        chunk_index: Which chunk to retrieve (0-based, default: 0)
         
     Returns:
-        Список документов
+        List[TextContent]: Document content chunk with pagination info
     """
     try:
         async with app_container() as container:
             documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
-            documents = await documents_repository.get_all(limit=limit)
             
-            results = []
-            for doc in documents:
-                results.append({
-                    "id": str(doc.id),
-                    "filename": doc.original_filename,
-                    "content_type": doc.content_type,
-                    "status": doc.status.value if hasattr(doc.status, 'value') else str(doc.status),
-                    "created_at": doc.created_at.isoformat() if hasattr(doc, 'created_at') else None,
-                    "content_length": len(doc.content) if doc.content else 0
-                })
+            # Получаем документ
+            document = await documents_repository.get_one(
+                where=[Document.id == document_id]
+            )
             
-            return results
+            if not document:
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Document with ID {document_id} not found"
+                )]
+            
+            if not document.content:
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Document '{document.original_filename}' has no content"
+                )]
+            
+            # Разбиваем контент на чанки
+            content = document.content
+            total_chunks = (len(content) + chunk_size - 1) // chunk_size  # Округление вверх
+            
+            if chunk_index >= total_chunks:
+                return [TextContent(
+                    type="text",
+                    text=f"❌ Chunk index {chunk_index} is out of range. Document has {total_chunks} chunks (0-{total_chunks-1})"
+                )]
+            
+            # Извлекаем нужный чанк
+            start_pos = chunk_index * chunk_size
+            end_pos = min(start_pos + chunk_size, len(content))
+            chunk_content = content[start_pos:end_pos]
+            
+            # Формируем ответ
+            response = f"📄 **Full Document Content - Chunk {chunk_index + 1}/{total_chunks}**\n\n"
+            response += f"**Document:** {document.original_filename}\n"
+            response += f"**ID:** {document_id}\n"
+            response += f"**Chunk Size:** {chunk_size} characters\n"
+            response += f"**Position:** {start_pos:,}-{end_pos:,} of {len(content):,} characters\n\n"
+            response += f"**Content:**\n```\n{chunk_content}\n```\n\n"
+            
+            # Добавляем информацию о навигации
+            if total_chunks > 1:
+                response += f"**Navigation:**\n"
+                if chunk_index > 0:
+                    response += f"- Previous chunk: chunk_index={chunk_index-1}\n"
+                if chunk_index < total_chunks - 1:
+                    response += f"- Next chunk: chunk_index={chunk_index+1}\n"
+                response += f"- All chunks: 0 to {total_chunks-1}\n"
+            
+            return [TextContent(type="text", text=response)]
             
     except Exception as e:
-        return [{"error": f"Ошибка при получении списка документов: {str(e)}"}]
+        return [TextContent(
+            type="text",
+            text=f"❌ Error retrieving document content: {str(e)}"
+        )]
 
 
-async def upload_document(filename: str, content: str, content_type: str = "text/plain") -> Dict[str, Any]:
+async def query_documents(
+    filters: Optional[Dict[str, Any]] = None,
+    order_by: Optional[str] = None,
+    limit: Optional[int] = None,
+    count_only: bool = False,
+    group_by: Optional[str] = None
+) -> List[TextContent]:
     """
-    Загрузка нового документа (симуляция)
+    Query documents with flexible filtering, sorting, and aggregation.
+    
+    Use this tool when you need:
+    - Count documents (e.g., "how many documents do I have?")
+    - Filter by status, content type, date range, etc.
+    - Group documents by specific fields
+    - Sort documents by various criteria
+    - Get statistics about your document collection
     
     Args:
-        filename: Имя файла
-        content: Содержимое файла
-        content_type: Тип содержимого
+        filters: Dictionary of filters to apply. Available fields:
+            - status: DocumentStatus (PENDING, PROCESSING, COMPLETED, FAILED)
+            - content_type: str (e.g., "application/pdf", "text/plain")
+            - filename: str (partial match)
+            - original_filename: str (partial match)
+            - created_after: str (ISO date, e.g., "2024-01-01")
+            - created_before: str (ISO date, e.g., "2024-12-31")
+            - min_content_length: int (minimum content length)
+            - max_content_length: int (maximum content length)
+        order_by: Field to sort by (e.g., "created_at", "filename", "content_length")
+        limit: Maximum number of documents to return
+        count_only: If True, returns only count without document details
+        group_by: Field to group by (e.g., "status", "content_type")
         
     Returns:
-        Результат загрузки
+        List[TextContent]: Query results with statistics and document information
     """
-    # Это симуляция - в реальности нужно использовать CreateDocumentInteractor
-    return {
-        "message": f"Документ '{filename}' успешно загружен",
-        "filename": filename,
-        "content_type": content_type,
-        "content_length": len(content),
-        "note": "Это симуляция загрузки. Для реальной загрузки используйте API endpoint /documents/upload"
-    }
+    try:
+        async with app_container() as container:
+            documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
+            
+            # Строим условия WHERE
+            where_conditions = []
+            
+            if filters:
+                if "status" in filters:
+                    where_conditions.append(Document.status == filters["status"])
+                
+                if "content_type" in filters:
+                    where_conditions.append(Document.content_type == filters["content_type"])
+                
+                if "filename" in filters:
+                    where_conditions.append(Document.filename.ilike(f"%{filters['filename']}%"))
+                
+                if "original_filename" in filters:
+                    where_conditions.append(Document.original_filename.ilike(f"%{filters['original_filename']}%"))
+                
+                if "created_after" in filters:
+                    from datetime import datetime
+                    created_after = datetime.fromisoformat(filters["created_after"].replace('Z', '+00:00'))
+                    where_conditions.append(Document.created_at >= created_after)
+                
+                if "created_before" in filters:
+                    from datetime import datetime
+                    created_before = datetime.fromisoformat(filters["created_before"].replace('Z', '+00:00'))
+                    where_conditions.append(Document.created_at <= created_before)
+                
+                if "min_content_length" in filters:
+                    where_conditions.append(Document.content.length() >= filters["min_content_length"])
+                
+                if "max_content_length" in filters:
+                    where_conditions.append(Document.content.length() <= filters["max_content_length"])
+            
+            # Получаем документы
+            
+            # Создаем запрос с лимитом если нужно
+            request_query = None
+            if limit:
+                request_query = InfiniteScrollRequest(limit=limit, offset=0)
+            
+            documents = await documents_repository.get_all(
+                request_query=request_query,
+                where=where_conditions if where_conditions else None
+            )
+            
+            # Если нужен только счетчик
+            if count_only:
+                total_count = len(documents)
+                response = f"📊 **Document Count**\n\n"
+                response += f"**Total documents:** {total_count}\n"
+                
+                if filters:
+                    response += f"\n**Applied filters:**\n"
+                    for key, value in filters.items():
+                        response += f"- {key}: {value}\n"
+                
+                return [TextContent(type="text", text=response)]
+            
+            # Группировка
+            if group_by:
+                groups = {}
+                for doc in documents:
+                    if group_by == "status":
+                        key = doc.status.value if hasattr(doc.status, 'value') else str(doc.status)
+                    elif group_by == "content_type":
+                        key = doc.content_type
+                    elif group_by == "filename":
+                        key = doc.original_filename.split('.')[-1] if '.' in doc.original_filename else "unknown"
+                    else:
+                        key = "unknown"
+                    
+                    if key not in groups:
+                        groups[key] = []
+                    groups[key].append(doc)
+                
+                response = f"📊 **Documents grouped by {group_by}**\n\n"
+                for group_name, group_docs in groups.items():
+                    response += f"**{group_name}:** {len(group_docs)} documents\n"
+                    for doc in group_docs[:3]:  # Показываем первые 3 документа в группе
+                        response += f"  - {doc.original_filename} ({doc.status.value if hasattr(doc.status, 'value') else doc.status})\n"
+                    if len(group_docs) > 3:
+                        response += f"  ... and {len(group_docs) - 3} more\n"
+                    response += "\n"
+                
+                return [TextContent(type="text", text=response)]
+            
+            # Обычный список документов
+            if not documents:
+                response = f"📄 **No documents found**\n\n"
+                if filters:
+                    response += f"**Applied filters:**\n"
+                    for key, value in filters.items():
+                        response += f"- {key}: {value}\n"
+                return [TextContent(type="text", text=response)]
+            
+            # Сортируем если нужно
+            if order_by:
+                if order_by == "created_at":
+                    documents.sort(key=lambda x: x.created_at, reverse=True)
+                elif order_by == "filename":
+                    documents.sort(key=lambda x: x.original_filename.lower())
+                elif order_by == "content_length":
+                    documents.sort(key=lambda x: len(x.content) if x.content else 0, reverse=True)
+                elif order_by == "status":
+                    documents.sort(key=lambda x: x.status.value if hasattr(x.status, 'value') else str(x.status))
+            
+            # Формируем ответ
+            response = f"📄 **Found {len(documents)} documents**\n\n"
+            
+            if filters:
+                response += f"**Applied filters:**\n"
+                for key, value in filters.items():
+                    response += f"- {key}: {value}\n"
+                response += "\n"
+            
+            if order_by:
+                response += f"**Sorted by:** {order_by}\n\n"
+            
+            # Показываем документы
+            for i, doc in enumerate(documents, 1):
+                content_length = len(doc.content) if doc.content else 0
+                status = doc.status.value if hasattr(doc.status, 'value') else str(doc.status)
+                created_at = doc.created_at.isoformat() if hasattr(doc, 'created_at') else "N/A"
+                
+                response += f"**{i}. {doc.original_filename}**\n"
+                response += f"   🆔 ID: {doc.id}\n"
+                response += f"   📊 Status: {status}\n"
+                response += f"   📄 Type: {doc.content_type}\n"
+                response += f"   📏 Size: {content_length:,} characters\n"
+                response += f"   📅 Created: {created_at}\n\n"
+            
+            return [TextContent(type="text", text=response)]
+            
+    except Exception as e:
+        return [TextContent(
+            type="text",
+            text=f"❌ Error querying documents: {str(e)}"
+        )]
+
 

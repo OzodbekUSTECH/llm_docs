@@ -1,7 +1,9 @@
+import asyncio
 import hashlib
 import uuid
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Optional, Tuple
+from docling_core.types.doc.document import DoclingDocument
 from fastapi import UploadFile
 from sentence_transformers import SentenceTransformer
 
@@ -15,8 +17,9 @@ from qdrant_client import AsyncQdrantClient
 
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
+import logging
 
-
+logger = logging.getLogger(__name__)
 
 class CreateDocumentInteractor:
     def __init__(
@@ -38,6 +41,123 @@ class CreateDocumentInteractor:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.document_converter = document_converter
         self.docling_chunker = docling_chunker
+        
+        
+    async def _extract_text_and_tables(self, file_path: str) -> Tuple[Optional[str], List[Dict]]:
+        """Extract text content and tables from file using Docling"""
+        file_path = Path(file_path)
+        
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        # Handle plain text files directly (Docling doesn't support them)
+        if file_path.suffix.lower() == '.txt':
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                logger.info(f"Read plain text file directly: {len(content)} characters")
+                return content, []  # No tables in plain text
+            except Exception as e:
+                logger.error(f"Failed to read plain text file {file_path}: {e}")
+                raise Exception(f"Plain text file reading failed: {str(e)}")
+        
+        try:
+            # Run Docling conversion in a thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, 
+                self.document_converter.convert, 
+                str(file_path)
+            )
+            
+            
+            # Export to markdown for rich text preservation
+            # This includes tables, lists, headers, and other structure
+            markdown_content = result.document.export_to_markdown()
+            
+            # If markdown is empty, try plain text export
+            if not markdown_content or not markdown_content.strip():
+                # Fall back to text representation
+                text_content = str(result.document)
+                content = text_content if text_content.strip() else None
+            else:
+                content = markdown_content
+            
+            # Extract tables from the document
+            tables = []
+            try:
+                # Docling provides tables through the document structure
+                if hasattr(result.document, 'tables'):
+                    for idx, table in enumerate(result.document.tables):
+                        # Convert table to a structured format
+                        table_data = {
+                            "index": idx,
+                            "rows": [],
+                            "headers": [],
+                            "caption": getattr(table, 'caption', None)
+                        }
+                        
+                        # Extract table content - convert TableData to JSON-serializable format
+                        if hasattr(table, 'data') and table.data:
+                            # table.data is a TableData object, extract its grid
+                            if hasattr(table.data, 'grid'):
+                                # Convert grid of TableCell objects to simple array of arrays
+                                table_rows = []
+                                for row in table.data.grid:
+                                    row_data = []
+                                    for cell in row:
+                                        if hasattr(cell, 'text'):
+                                            row_data.append(cell.text)
+                                        else:
+                                            row_data.append(str(cell))
+                                    table_rows.append(row_data)
+                                table_data["rows"] = table_rows
+                                
+                                # Try to extract headers from first row if they are marked as headers
+                                if table_rows and hasattr(table.data, 'grid') and len(table.data.grid) > 0:
+                                    first_row = table.data.grid[0]
+                                    if any(hasattr(cell, 'column_header') and cell.column_header for cell in first_row):
+                                        table_data["headers"] = table_rows[0]
+                                        table_data["rows"] = table_rows[1:]  # Remove header row from data
+                                    
+                        # Try to get HTML representation if available
+                        try:
+                            if hasattr(table, 'to_html'):
+                                table_data["html"] = table.to_html()
+                        except:
+                            pass
+                        
+                        # Try to get CSV representation if available
+                        try:
+                            if hasattr(table, 'to_csv'):
+                                table_data["csv"] = table.to_csv()
+                        except:
+                            pass
+                            
+                        tables.append(table_data)
+                        logger.info(f"Extracted table {idx} with {len(table_data.get('rows', []))} rows from document")
+                
+                # Also check for tables in the document elements
+                if hasattr(result.document, 'elements'):
+                    for element in result.document.elements:
+                        if hasattr(element, 'type') and element.type == 'table':
+                            table_data = {
+                                "index": len(tables),
+                                "content": str(element),
+                                "type": "element_table"
+                            }
+                            tables.append(table_data)
+                            
+            except Exception as e:
+                logger.warning(f"Failed to extract tables: {e}")
+                # Continue processing even if table extraction fails
+            
+            logger.info(f"Extracted {len(tables)} tables from document")
+            return content, tables, result.document
+            
+        except Exception as e:
+            logger.error(f"Docling extraction failed for {file_path}: {e}")
+            raise Exception(f"Document extraction failed: {str(e)}")
 
     async def execute(self, file: UploadFile) -> Document:
         """
@@ -68,117 +188,37 @@ class CreateDocumentInteractor:
         file_path = self.storage_dir / stored_filename
         with open(file_path, "wb") as f:
             f.write(file_bytes)
-
-        # 5. Парсим файл с помощью Docling
+            
         try:
-            print(f"🔄 Начинаем парсинг файла: {file.filename}")
+            content, tables, dl_doc = await self._extract_text_and_tables(file_path)
+            print(f"✅ Docling документ извлечен: {content}")
             
-            # Конвертируем документ
-            result = self.document_converter.convert(str(file_path))
+            if not content:
+                raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
             
-            # Извлекаем структурированный контент
-            structured_content = self._extract_structured_content(result)
-            
-            # Экспортируем в Markdown с правильным отображением таблиц
-            # strict_text=False позволяет извлечь максимум текста из таблиц
-            markdown_content = result.document.export_to_markdown(strict_text=False)
-            
-            # Извлекаем таблицы
-            tables = self._extract_tables_from_docling_result(result)
-            
-            print(f"✅ Docling парсинг успешен:")
-            print(f"   - Markdown контент: {len(markdown_content)} символов")
-            print(f"   - Структурных элементов: {len(structured_content.get('elements', []))}")
-            print(f"   - Таблиц: {len(tables)}")
-            
-            # Показываем первые 500 символов markdown для диагностики
-            if markdown_content:
-                preview = markdown_content[:500].replace('\n', '\\n')
-                print(f"   📄 Превью контента: {preview}...")
-            
-        except Exception as e:
-            print(f"❌ Ошибка парсинга с Docling: {e}")
-            # Удаляем файл при ошибке парсинга
-            if file_path.exists():
-                file_path.unlink()
-            
-            error_msg = f"Не удалось обработать файл {ext}. "
-            if ext.lower() == '.pdf':
-                error_msg += "PDF может содержать только изображения или быть защищён паролем. "
-                error_msg += "Попробуйте конвертировать PDF в текстовый формат."
-            else:
-                error_msg += "Файл может быть повреждён или в неподдерживаемом формате."
-            raise AppError(status_code=400, message=error_msg)
-
-        # Проверяем, что удалось извлечь контент
-        if not markdown_content or not markdown_content.strip():
-            if file_path.exists():
-                file_path.unlink()
-            raise AppError(
-                status_code=400, 
-                message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения."
+            document = Document(
+                id=id,
+                filename=stored_filename,
+                original_filename=file.filename,
+                file_path=str(file_path),
+                content_type=file.content_type or "application/octet-stream",
+                file_hash=file_hash,
+                status=DocumentStatus.COMPLETED,
+                content=content,
+                tables=tables,
             )
-        
-        # Для PDF с очень коротким контентом выводим предупреждение
-        if ext.lower() == '.pdf' and len(markdown_content.strip()) < 100:
-            print(f"⚠️ Контент PDF очень короткий ({len(markdown_content)} символов). "
-                  f"Возможно, это отсканированный документ.")
-
-        print(f"📄 Информация о файле:")
-        print(f"   - Тип: {file.content_type}")
-        print(f"   - Расширение: {ext}")
-        print(f"   - Размер контента: {len(markdown_content)} символов")
-
-        # 6. Создаём Document с структурированным контентом
-        document = Document(
-            id=id,
-            filename=stored_filename,
-            original_filename=file.filename,
-            file_path=str(file_path),
-            content_type=file.content_type or "application/octet-stream",
-            file_hash=file_hash,
-            status=DocumentStatus.COMPLETED,
-            content=markdown_content,
-            tables=tables,
-            # Сохраняем структурированный контент в doc_metadata
-            doc_metadata={
-                "structured_content": structured_content,
-                "parsing_method": "docling",
-                "has_tables": len(tables) > 0
-            }
-        )
-        await self.documents_repository.create(document)
-
-        # 7. Делим на чанки с помощью Docling chunker
-        chunks = self._chunk_with_docling(result)
-        
-        print(f"📦 Chunking результаты:")
-        print(f"   - Количество чанков: {len(chunks)}")
-        if chunks:
-            avg_size = sum(len(chunk) for chunk in chunks) / len(chunks)
-            print(f"   - Средний размер: {avg_size:.0f} символов")
-            print(f"   - Размеры первых 5: {[len(c) for c in chunks[:5]]}")
-
-        # 8. Получаем эмбеддинги с префиксом для E5 модели
-        if chunks and any(chunk.strip() for chunk in chunks):
-            print(f"🔄 Генерация эмбеддингов для {len(chunks)} чанков...")
+            await self.documents_repository.create(document)
             
-            # ВАЖНО: E5 модели требуют префикс "passage: " для документов
-            # Это улучшает качество эмбеддингов на 10-15%!
-            chunks_with_prefix = ["passage: " + chunk for chunk in chunks]
+            chunks = self._chunk_with_docling(dl_doc)
             
             embeddings = self.sentence_transformer.encode(
-                chunks_with_prefix,
+                chunks,
                 convert_to_numpy=True,
+                normalize_embeddings=True,
                 show_progress_bar=False,
-                batch_size=32,
-                normalize_embeddings=True  # Нормализуем для косинусного расстояния
+                batch_size=8,
             )
             
-            print(f"✅ Эмбеддинги сгенерированы: {embeddings.shape}")
-            print(f"   📊 С префиксом 'passage:' для E5 модели")
-            
-            # 9. Сохраняем чанки + эмбеддинги в Qdrant с метаданными
             await self.qdrant_embeddings_repository.bulk_create_embeddings(
                 document_id=str(document.id),
                 chunks=chunks,  # Сохраняем БЕЗ префикса
@@ -187,196 +227,28 @@ class CreateDocumentInteractor:
                 metadata={
                     "filename": document.original_filename,
                     "content_type": file.content_type,
-                    "has_tables": len(tables) > 0,
                 }
             )
-            print(f"✅ Сохранено {len(chunks)} чанков в Qdrant с метаданными")
-        else:
-            print("⚠️ Нет чанков для сохранения в Qdrant")
-
-        # 10. Коммитим UoW
-        await self.uow.commit()
-        print(f"✅ Документ успешно создан и сохранён")
-
-        return document
-
-    def _extract_structured_content(self, result) -> Dict[str, Any]:
-        """
-        Извлекает структурированный контент из результата Docling.
-        Сохраняет структуру документа: заголовки, параграфы, списки, таблицы.
-        
-        ВАЖНО: Для таблиц пытаемся извлечь максимум информации разными способами.
-        """
-        structured = {
-            "elements": [],
-            "metadata": {}
-        }
-        
-        try:
-            # Проверяем наличие метода iterate_items
-            if not hasattr(result.document, 'iterate_items'):
-                print(f"⚠️ Документ не имеет метода iterate_items")
-                return structured
             
-            # Итерируемся по элементам документа
-            element_count = 0
-            elements_by_type = {}
             
-            for item in result.document.iterate_items():
-                element_count += 1
-                
-                # Получаем тип элемента
-                item_type = getattr(item, 'label', 'paragraph')
-                elements_by_type[item_type] = elements_by_type.get(item_type, 0) + 1
-                
-                # Извлекаем текст разными способами
-                text = ""
-                
-                # Способ 1: прямой атрибут text
-                if hasattr(item, 'text') and item.text:
-                    text = item.text
-                
-                # Способ 2: для таблиц пытаемся получить текст через export
-                elif item_type == 'table' and hasattr(item, 'export_to_markdown'):
-                    try:
-                        text = item.export_to_markdown()
-                    except:
-                        pass
-                
-                # Способ 3: через str() для некоторых типов
-                if not text and hasattr(item, '__str__'):
-                    try:
-                        text_candidate = str(item)
-                        if text_candidate and len(text_candidate) < 10000:  # Разумный лимит
-                            text = text_candidate
-                    except:
-                        pass
-                
-                element = {
-                    "type": item_type,
-                    "text": text,
-                    "level": getattr(item, 'level', None),
-                }
-                
-                # Добавляем дополнительные атрибуты если есть (но сериализуем их!)
-                if hasattr(item, 'bbox'):
-                    bbox = item.bbox
-                    # Конвертируем bbox в dict если это объект
-                    if hasattr(bbox, '__dict__'):
-                        element["bbox"] = {
-                            'l': getattr(bbox, 'l', 0),
-                            't': getattr(bbox, 't', 0),
-                            'r': getattr(bbox, 'r', 0),
-                            'b': getattr(bbox, 'b', 0),
-                        }
-                    else:
-                        element["bbox"] = bbox
-                
-                # Сохраняем элемент если есть текст
-                if text.strip():
-                    structured["elements"].append(element)
+            await self.uow.commit()
             
-            print(f"📊 Обработано элементов: {element_count}, сохранено: {len(structured['elements'])}")
-            print(f"📊 Типы элементов: {elements_by_type}")
+            print(f"✅ Docling парсинг успешен:")
             
-            # Добавляем метаданные документа (сериализуем если это объект)
-            if hasattr(result.document, 'metadata'):
-                metadata = result.document.metadata
-                if hasattr(metadata, '__dict__'):
-                    # Конвертируем объект в dict
-                    structured["metadata"] = {
-                        k: v for k, v in metadata.__dict__.items() 
-                        if not k.startswith('_') and isinstance(v, (str, int, float, bool, type(None)))
-                    }
-                elif isinstance(metadata, dict):
-                    structured["metadata"] = metadata
-                else:
-                    structured["metadata"] = {}
-                
+            return document
+            
+            
+           
         except Exception as e:
-            print(f"⚠️ Ошибка извлечения структуры: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Ошибка парсинга с Docling: {e}")
+            # Удаляем файл при ошибке парсинга
+            if file_path.exists():
+                file_path.unlink()
+            raise AppError(status_code=400, message=f"Не удалось обработать файл {ext}. {str(e)}")
         
-        return structured
+        
 
-    def _extract_tables_from_docling_result(self, result) -> List[Dict[str, Any]]:
-        """
-        Извлекает таблицы из результата Docling с подробной информацией.
-        Пытается извлечь максимум текста из таблиц разными способами.
-        """
-        tables = []
-        table_count = 0
-        
-        try:
-            for item in result.document.iterate_items():
-                if hasattr(item, 'label') and item.label == 'table':
-                    table_count += 1
-                    
-                    # Извлекаем текст таблицы разными способами
-                    table_text = ""
-                    
-                    # Способ 1: прямой текст
-                    if hasattr(item, 'text') and item.text:
-                        table_text = item.text
-                    
-                    # Способ 2: export_to_markdown
-                    if not table_text and hasattr(item, 'export_to_markdown'):
-                        try:
-                            table_text = item.export_to_markdown()
-                        except:
-                            pass
-                    
-                    # Способ 3: через data если есть
-                    if not table_text and hasattr(item, 'data'):
-                        try:
-                            # Пытаемся сконвертировать data в текст
-                            data = item.data
-                            if isinstance(data, (list, dict)):
-                                table_text = str(data)
-                        except:
-                            pass
-                    
-                    table_data = {
-                        'text': table_text,
-                        'label': item.label,
-                        'rows': [],
-                        'metadata': {}
-                    }
-                    
-                    # Пытаемся извлечь структуру таблицы (но НЕ сохраняем сырые объекты!)
-                    # data может быть очень большим и содержать несериализуемые объекты
-                    # Вместо этого используем text который уже извлечен
-                    
-                    if hasattr(item, 'bbox'):
-                        bbox = item.bbox
-                        if hasattr(bbox, '__dict__'):
-                            table_data['bbox'] = {
-                                'l': getattr(bbox, 'l', 0),
-                                't': getattr(bbox, 't', 0),
-                                'r': getattr(bbox, 'r', 0),
-                                'b': getattr(bbox, 'b', 0),
-                            }
-                        else:
-                            table_data['bbox'] = bbox
-                    
-                    if table_text.strip():
-                        tables.append(table_data)
-                        print(f"   ✓ Таблица {table_count}: {len(table_text)} символов")
-                    else:
-                        print(f"   ⚠️ Таблица {table_count}: не удалось извлечь текст")
-                        
-        except Exception as e:
-            print(f"⚠️ Ошибка извлечения таблиц: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        if table_count > 0:
-            print(f"📊 Найдено таблиц: {table_count}, извлечено с текстом: {len(tables)}")
-        
-        return tables
-
-    def _chunk_with_docling(self, docling_result) -> List[str]:
+    def _chunk_with_docling(self, docling_document: DoclingDocument) -> List[str]:
         """
         Разделяет контент на чанки с помощью Docling HybridChunker.
         
@@ -388,73 +260,20 @@ class CreateDocumentInteractor:
         
         """
        
-        try:
-            if not docling_result or not hasattr(docling_result, 'document'):
-                raise ValueError("Некорректный результат Docling")
             
-            print(f"🔄 Используем Docling HybridChunker...")
+        # Получаем итератор чанков
+        chunk_iter = self.docling_chunker.chunk(dl_doc=docling_document)
+        
+        # Обрабатываем чанки с контекстуализацией
+        chunks = []
+        
+        for chunk in chunk_iter:
             
-            # Получаем итератор чанков
-            chunk_iter = self.docling_chunker.chunk(dl_doc=docling_result.document)
+            # КЛЮЧЕВОЙ МОМЕНТ: используем contextualize() для добавления контекста
+            # Это добавляет заголовки разделов к чанку для лучшего понимания
+            enriched_text = self.docling_chunker.contextualize(chunk=chunk)
             
-            # Обрабатываем чанки с контекстуализацией
-            chunks = []
-            chunk_stats = {
-                'total': 0,
-                'with_context': 0,
-                'min_size': float('inf'),
-                'max_size': 0,
-            }
+            chunks.append(enriched_text)
             
-            for i, chunk in enumerate(chunk_iter):
-                if not hasattr(chunk, 'text') or not chunk.text.strip():
-                    continue
-                
-                chunk_stats['total'] += 1
-                
-                # КЛЮЧЕВОЙ МОМЕНТ: используем contextualize() для добавления контекста
-                # Это добавляет заголовки разделов к чанку для лучшего понимания
-                enriched_text = self.docling_chunker.contextualize(chunk=chunk)
-                
-                # Если контекст добавлен (текст изменился), отмечаем это
-                if enriched_text != chunk.text:
-                    chunk_stats['with_context'] += 1
-                
-                chunks.append(enriched_text.strip())
-                
-                # Статистика размеров
-                text_len = len(enriched_text)
-                chunk_stats['min_size'] = min(chunk_stats['min_size'], text_len)
-                chunk_stats['max_size'] = max(chunk_stats['max_size'], text_len)
-            
-            if not chunks:
-                raise ValueError("Docling chunker не создал чанки")
-            
-            # Красивый вывод статистики
-            avg_size = sum(len(c) for c in chunks) / len(chunks)
-            print(f"✅ Docling HybridChunker:")
-            print(f"   ├─ Всего чанков: {chunk_stats['total']}")
-            print(f"   ├─ С контекстом: {chunk_stats['with_context']} ({chunk_stats['with_context']/chunk_stats['total']*100:.1f}%)")
-            print(f"   ├─ Размеры: min={chunk_stats['min_size']}, avg={avg_size:.0f}, max={chunk_stats['max_size']}")
-            print(f"   └─ Первые 3 размера: {[len(c) for c in chunks[:3]]}")
-            
-            # Показываем пример контекстуализации
-            if chunk_stats['with_context'] > 0:
-                for i, chunk_text in enumerate(chunks[:2]):
-                    if '\n' in chunk_text[:100]:  # Скорее всего есть контекст
-                        lines = chunk_text.split('\n', 2)
-                        if len(lines) >= 2:
-                            print(f"   📌 Пример контекста чанка {i+1}: {lines[0][:80]}...")
-                            break
-            
-            # Показываем содержимое первого чанка для диагностики
-            if chunks:
-                first_chunk_preview = chunks[0][:300].replace('\n', '\\n')
-                print(f"   📝 Первый чанк: {first_chunk_preview}...")
-            
-            return chunks
-            
-        except Exception as e:
-            raise AppError(400, "Не удалось разделить документ на чанки")
-    
-   
+        
+        return chunks

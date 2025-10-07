@@ -1,6 +1,10 @@
 
 from qdrant_client import AsyncQdrantClient
+from qdrant_client.http.models import VectorParams, Distance
 from app.core.config import settings
+from dishka import AsyncContainer
+from sentence_transformers import SentenceTransformer
+from docling.chunking import HybridChunker
 
 
 async def init_qdrant_collection():
@@ -19,10 +23,11 @@ async def init_qdrant_collection():
             print("Creating Qdrant collection 'document_embeddings'...")
             await client.create_collection(
                 collection_name="document_embeddings",
-                vectors_config={
-                    "size": 1024,  # Размер вектора для e5-large-v2
-                    "distance": "Cosine"
-                }
+                vectors_config=VectorParams(
+                    size=768,
+                    distance=Distance.COSINE,
+                ),
+                on_disk_payload=True,
             )
             print("Collection created successfully!")
         else:
@@ -33,3 +38,13 @@ async def init_qdrant_collection():
     finally:
         await client.close()
 
+
+async def warmup_dependencies(container: AsyncContainer):
+    print("🚀 Прогреваем зависимости...")
+
+    # Получаем зависимости из контейнера, чтобы заставить Dishka их создать
+    sentence_transformer = await container.get(SentenceTransformer)
+    chunker = await container.get(HybridChunker)
+    _ = sentence_transformer.encode(["тестовая инициализация"])
+    print("✅ Модель эмбеддингов и chunker прогреты!")
+    

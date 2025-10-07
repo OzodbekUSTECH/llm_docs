@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from app.dto.chat import GenerateAnswerRequest, GeneratedAnswerResponse, ToolCall, Source
 from app.services.chat_storage import chat_storage
+from app.utils.openai_tools import OPENAI_TOOLS
 
 # Хранилище истории для каждого чата
 chat_histories: Dict[str, List[Dict[str, Any]]] = {}
@@ -64,50 +65,6 @@ Remember: It's better to say "I don't know" than to provide incorrect informatio
 
 Be professional, accurate, and respond in the same language as the user's question."""
 
-# OpenAI API tools definition
-OPENAI_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_documents",
-            "description": "Search for relevant documents using semantic vector search. Returns document IDs and relevant content chunks with high similarity scores. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information. Use this tool to find any factual information, data, or content from documents (e.g., company names, owners, directors, contracts, specifications, reports, etc.). The tool returns full relevant chunks without truncation.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language search query. Be specific and descriptive. Examples: 'owner of Floriana Impex company', 'vessel name and specifications', 'contract details and terms', 'company registration information', 'financial data for Q4 2023'. The more specific your query, the better the results."
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of documents to return. Higher values provide more context but may include less relevant results. Recommended: 3-5 for focused searches, 5-10 for comprehensive searches. Default is 10 for maximum information coverage.",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 20
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_document_by_id",
-            "description": "Retrieve the complete full text content of a specific document by its ID. Use this tool after search_documents when you need the entire document content, not just relevant excerpts. This returns the full untruncated document text.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "document_id": {
-                        "type": "string",
-                        "description": "Document UUID obtained from search_documents results. Each search result includes an 'id' field with the document UUID."
-                    }
-                },
-                "required": ["document_id"]
-            }
-        }
-    }
-]
 
 
 class OpenAIGenerateInteractor:
@@ -158,19 +115,107 @@ class OpenAIGenerateInteractor:
             # Если это первое сообщение
             is_first_message = len(chat_history) == 2
             
-            # OpenAI API call
+            # OpenAI API call with tools
             response = await asyncio.wait_for(
                 self.openai_client.chat.completions.create(
                     model=model,
                     messages=chat_history,
                     temperature=0.7,
-                    max_tokens=4000  # Увеличено для более полных ответов
+                    max_tokens=4000,  # Увеличено для более полных ответов
+                    tools=OPENAI_TOOLS,
+                    tool_choice="auto"
                 ),
                 timeout=60.0
             )
             
             response_message = response.choices[0].message
             final_content = response_message.content or ""
+            tool_calls_list = []
+            sources = []
+            
+            # Process tool calls if any
+            if response_message.tool_calls:
+                from app.utils.tools.registry import available_tools_dict
+                
+                print(f"[CHAT] Tool calls detected: {len(response_message.tool_calls)}")
+                
+                # Add assistant message with tool calls to history
+                chat_history.append({
+                    "role": "assistant",
+                    "content": final_content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
+                
+                # Process each tool call
+                for tool_call in response_message.tool_calls:
+                    tool_call_record = ToolCall(
+                        name=tool_call.function.name,
+                        arguments=json.loads(tool_call.function.arguments),
+                        success=False
+                    )
+                    
+                    try:
+                        function_name = tool_call.function.name
+                        if function_to_call := available_tools_dict.get(function_name):
+                            print(f'[TOOL] Calling: {function_name}')
+                            print(f'[TOOL] Arguments: {tool_call.function.arguments}')
+                            
+                            arguments = json.loads(tool_call.function.arguments)
+                            func_output = await function_to_call(**arguments)
+                            
+                            # Process List[TextContent] output
+                            if isinstance(func_output, list) and func_output and hasattr(func_output[0], 'text'):
+                                # Extract text from TextContent objects
+                                tool_response = "\n\n".join([item.text for item in func_output if hasattr(item, 'text')])
+                                tool_call_record.output = tool_response
+                            else:
+                                # Fallback for other output types
+                                tool_response = str(func_output)
+                                tool_call_record.output = tool_response
+                            
+                            tool_call_record.success = True
+                            print(f'[TOOL] Output: {tool_response[:200]}...' if len(tool_response) > 200 else f'[TOOL] Output: {tool_response}')
+                            
+                            # Add tool result to history
+                            chat_history.append({
+                                'role': 'tool',
+                                'tool_call_id': tool_call.id,
+                                'content': f"TOOL OUTPUT - USE ONLY THIS INFORMATION:\n\n{tool_response}\n\nIMPORTANT: Base your answer STRICTLY on the information above. Do NOT add information from your training data.",
+                                'name': function_name
+                            })
+                            
+                        else:
+                            tool_call_record.error = f"Функция {function_name} не найдена"
+                            print(f'[TOOL] Error: {tool_call_record.error}')
+                    
+                    except Exception as e:
+                        tool_call_record.error = str(e)
+                        tool_call_record.success = False
+                        print(f'[TOOL] Error: {e}')
+                    
+                    tool_calls_list.append(tool_call_record)
+                
+                # Get final response after tool calls
+                final_response = await asyncio.wait_for(
+                    self.openai_client.chat.completions.create(
+                        model=model,
+                        messages=chat_history,
+                        temperature=0.7,
+                        max_tokens=4000
+                    ),
+                    timeout=60.0
+                )
+                
+                final_content = final_response.choices[0].message.content or ""
             
             # Add assistant message to history
             chat_history.append({
@@ -201,9 +246,9 @@ class OpenAIGenerateInteractor:
             message_id=message_id,
             role="assistant",
             content=final_content,
-            sources=[],
-            tool_calls=[],
-            reasoning=None,
+            sources=sources,
+            tool_calls=tool_calls_list,
+            reasoning=f"Использовано инструментов: {len(tool_calls_list)}" if tool_calls_list else None,
             processing_time=round(processing_time, 2),
             model_used=model,
             timestamp=datetime.now().isoformat()
@@ -323,6 +368,7 @@ class OpenAIGenerateInteractor:
                 
                 # Stream OpenAI response with tools
                 try:
+                    
                     stream = await asyncio.wait_for(
                         self.openai_client.chat.completions.create(
                             model=model,
@@ -434,33 +480,43 @@ class OpenAIGenerateInteractor:
                                 
                                 arguments = json.loads(tool_call_data["function"]["arguments"])
                                 func_output = await function_to_call(**arguments)
-                                tool_call_record.output = str(func_output)
+                                
+                                # Process List[TextContent] output
+                                if isinstance(func_output, list) and func_output and hasattr(func_output[0], 'text'):
+                                    # Extract text from TextContent objects
+                                    tool_response = "\n\n".join([item.text for item in func_output if hasattr(item, 'text')])
+                                    tool_call_record.output = tool_response
+                                else:
+                                    # Fallback for other output types
+                                    tool_response = str(func_output)
+                                    tool_call_record.output = tool_response
+                                
                                 tool_call_record.success = True
                                 has_successful_tool = True
                                 
-                                print(f'[TOOL] Output: {func_output}')
+                                print(f'[TOOL] Output: {tool_response[:200]}...' if len(tool_response) > 200 else f'[TOOL] Output: {tool_response}')
                                 
                                 # Send tool call success event
                                 yield send_event('tool_call_success', {
                                     'tool_name': function_name,
-                                    'output': str(func_output)[:500] + '...' if len(str(func_output)) > 500 else str(func_output)
+                                    'output': tool_response[:500] + '...' if len(tool_response) > 500 else tool_response
                                 })
                                 
-                                # Extract sources if it's search_documents
+                                # Extract sources if it's search_documents (legacy format support)
                                 if function_name == "search_documents" and isinstance(func_output, list):
-                                    for result in func_output:
-                                        if isinstance(result, dict) and 'best_chunks' in result:
-                                            for chunk in result['best_chunks']:
-                                                sources.append(Source(
-                                                    filename=result.get('filename', 'Unknown'),
-                                                    content=chunk.get('content', ''),
-                                                    similarity=chunk.get('similarity', 0.0),
-                                                    chunk_index=chunk.get('chunk_index', 0)
-                                                ))
-                                
-                                # Add FULL tool result to history WITHOUT truncation
-                                # LLM needs complete information for accurate answers
-                                tool_response = str(func_output)
+                                    # Check if it's the old dict format
+                                    if func_output and isinstance(func_output[0], dict) and 'best_chunks' in func_output[0]:
+                                        for result in func_output:
+                                            if isinstance(result, dict) and 'best_chunks' in result:
+                                                for chunk in result['best_chunks']:
+                                                    sources.append(Source(
+                                                        filename=result.get('filename', 'Unknown'),
+                                                        content=chunk.get('content', ''),
+                                                        similarity=chunk.get('similarity', 0.0),
+                                                        chunk_index=chunk.get('chunk_index', 0)
+                                                    ))
+                                    # For TextContent format, we can't extract detailed sources easily
+                                    # The text content already contains formatted information
                                 
                                 chat_history.append({
                                     'role': 'tool',

@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
-from qdrant_client.http.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.http.models import Distance, ScoredPoint, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 import numpy as np
 
 
@@ -63,7 +63,6 @@ class QdrantEmbeddingsRepository:
                 payload.update({
                     "filename": metadata.get("filename", ""),
                     "content_type": metadata.get("content_type", ""),
-                    "has_tables": metadata.get("has_tables", False),
                 })
             
             points.append(
@@ -84,47 +83,21 @@ class QdrantEmbeddingsRepository:
         query_vector: List[float], 
         limit: int = 10,
         similarity_threshold: float = 0.7,
-        document_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[ScoredPoint]:
         """Поиск похожих чанков по вектору запроса"""
         await self.ensure_collection_exists()
         
-        # Создаем фильтр по document_id если указан
-        query_filter = None
-        if document_id:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="document_id",
-                        match=MatchValue(value=document_id)
-                    )
-                ]
-            )
         
         search_result = await self.client.search(
             collection_name=self.COLLECTION_NAME,
             query_vector=query_vector,
             limit=limit,
-            query_filter=query_filter,
-            with_payload=True
+            with_payload=True,
+            score_threshold=similarity_threshold
         )
         
-        results = []
-        for hit in search_result:
-            # Qdrant возвращает score (чем больше, тем лучше)
-            # Конвертируем в similarity (0-1)
-            similarity = hit.score
-            
-            if similarity >= similarity_threshold:
-                results.append({
-                    "document_id": hit.payload["document_id"],
-                    "chunk_index": hit.payload["chunk_index"],
-                    "chunk_content": hit.payload["chunk_content"],
-                    "similarity": float(similarity),
-                    "point_id": hit.id
-                })
         
-        return results
+        return search_result
     
     async def delete_document_embeddings(self, document_id: str) -> None:
         """Удаляет все эмбеддинги документа"""
