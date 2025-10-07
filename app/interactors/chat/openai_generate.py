@@ -115,18 +115,40 @@ class OpenAIGenerateInteractor:
             # Если это первое сообщение
             is_first_message = len(chat_history) == 2
             
-            # OpenAI API call with tools
-            response = await asyncio.wait_for(
-                self.openai_client.chat.completions.create(
-                    model=model,
-                    messages=chat_history,
-                    temperature=0.7,
-                    max_tokens=4000,  # Увеличено для более полных ответов
-                    tools=OPENAI_TOOLS,
-                    tool_choice="auto"
-                ),
-                timeout=60.0
-            )
+            # OpenAI API call with tools (with retry logic)
+            response = None
+            max_retries = 2
+            retry_count = 0
+            
+            while retry_count < max_retries and response is None:
+                try:
+                    print(f"[CHAT] Starting OpenAI API call (retry {retry_count + 1})")
+                    response = await asyncio.wait_for(
+                        self.openai_client.chat.completions.create(
+                            model=model,
+                            messages=chat_history,
+                            temperature=0.7,
+                            max_tokens=4000,  # Увеличено для более полных ответов
+                            tools=OPENAI_TOOLS,
+                            tool_choice="auto"
+                        ),
+                        timeout=60.0
+                    )
+                    print(f"[CHAT] OpenAI API call completed successfully")
+                    
+                except asyncio.TimeoutError:
+                    retry_count += 1
+                    print(f"[CHAT] OpenAI API call timed out (retry {retry_count}/{max_retries})")
+                    if retry_count >= max_retries:
+                        raise
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    retry_count += 1
+                    print(f"[CHAT] OpenAI API error (retry {retry_count}/{max_retries}): {e}")
+                    if retry_count >= max_retries:
+                        raise
+                    await asyncio.sleep(1)
             
             response_message = response.choices[0].message
             final_content = response_message.content or ""
@@ -352,6 +374,7 @@ class OpenAIGenerateInteractor:
             # Agentic loop для работы с инструментами
             max_iterations = 5
             iteration = 0
+            max_retries = 2  # Максимум 2 попытки для каждого вызова API
             
             while iteration < max_iterations:
                 iteration += 1
@@ -367,27 +390,55 @@ class OpenAIGenerateInteractor:
                 })
                 
                 # Stream OpenAI response with tools
-                try:
-                    
-                    stream = await asyncio.wait_for(
-                        self.openai_client.chat.completions.create(
-                            model=model,
-                            messages=chat_history,
-                            temperature=0,
-                            max_tokens=4000,  # Увеличено для более полных ответов
-                            tools=OPENAI_TOOLS,
-                            tool_choice="auto",
-                            stream=True
-                        ),
-                        timeout=5.0
-                    )
-                except asyncio.TimeoutError:
-                    print(f"[CHAT] Stream initialization timed out")
-                    yield send_event('error', {
-                        'message': 'Не удалось начать генерацию ответа. Попробуйте ещё раз.',
-                        'error': 'Timeout'
-                    })
-                    return
+                stream = None
+                retry_count = 0
+                
+                while retry_count < max_retries and stream is None:
+                    try:
+                        print(f"[CHAT] Starting OpenAI stream call (iteration {iteration}, retry {retry_count + 1})")
+                        start_call_time = time.time()
+                        
+                        stream = await asyncio.wait_for(
+                            self.openai_client.chat.completions.create(
+                                model=model,
+                                messages=chat_history,
+                                temperature=0,
+                                max_tokens=4000,  # Увеличено для более полных ответов
+                                tools=OPENAI_TOOLS,
+                                tool_choice="auto",
+                                stream=True
+                            ),
+                            timeout=30.0  # Увеличено с 5 до 30 секунд
+                        )
+                        
+                        call_duration = time.time() - start_call_time
+                        print(f"[CHAT] Stream call completed in {call_duration:.2f}s")
+                        
+                    except asyncio.TimeoutError:
+                        retry_count += 1
+                        print(f"[CHAT] Stream initialization timed out after 30s (retry {retry_count}/{max_retries})")
+                        if retry_count >= max_retries:
+                            yield send_event('error', {
+                                'message': 'Не удалось начать генерацию ответа после нескольких попыток. Попробуйте ещё раз.',
+                                'error': 'Timeout'
+                            })
+                            return
+                        else:
+                            # Небольшая пауза перед повтором
+                            await asyncio.sleep(1)
+                            
+                    except Exception as api_error:
+                        retry_count += 1
+                        print(f"[CHAT] OpenAI API error (retry {retry_count}/{max_retries}): {api_error}")
+                        if retry_count >= max_retries:
+                            yield send_event('error', {
+                                'message': f'Ошибка API после нескольких попыток: {str(api_error)}',
+                                'error': str(api_error)
+                            })
+                            return
+                        else:
+                            # Небольшая пауза перед повтором
+                            await asyncio.sleep(1)
                 
                 content_started = False
                 accumulated_tool_calls = []
@@ -542,10 +593,6 @@ class OpenAIGenerateInteractor:
                         
                         tool_calls_list.append(tool_call_record)
                     
-                    if not has_successful_tool:
-                        print("[CHAT] No successful tool calls - breaking")
-                        break
-                    
                     # Reset content for next iteration
                     accumulated_content = ""
                     
@@ -560,6 +607,36 @@ class OpenAIGenerateInteractor:
                 else:
                     print("[CHAT] No content or tool calls")
                     break
+            
+            # Если все итерации закончились, генерируем финальный ответ на основе того что есть
+            if iteration >= max_iterations and not accumulated_content:
+                print(f"[CHAT] Max iterations reached, generating final response based on available information")
+                
+                # Проверяем, есть ли хотя бы один успешный tool call
+                successful_tools = [tc for tc in tool_calls_list if tc.success]
+                if successful_tools:
+                    print(f"[CHAT] Found {len(successful_tools)} successful tool calls, generating response")
+                else:
+                    print(f"[CHAT] No successful tool calls, generating response based on available context")
+                
+                # Генерируем финальный ответ на основе всей истории
+                final_response = await asyncio.wait_for(
+                    self.openai_client.chat.completions.create(
+                        model=model,
+                        messages=chat_history,
+                        temperature=0,
+                        max_tokens=4000
+                    ),
+                    timeout=90.0  # Увеличено с 60 до 90 секунд
+                )
+                
+                accumulated_content = final_response.choices[0].message.content or "Извините, я не смог найти достаточно информации для полного ответа на ваш вопрос."
+                
+                # Добавляем финальный ответ в историю
+                chat_history.append({
+                    'role': 'assistant',
+                    'content': accumulated_content
+                })
             
             # Set final content
             if not accumulated_content:

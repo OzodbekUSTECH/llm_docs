@@ -11,13 +11,14 @@ from app.dto.ai_models import TextContent
 from app.dto.pagination import InfiniteScrollRequest
 
 
-async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
+async def search_documents(query: str, limit: int = 10, document_ids: Optional[List[str]] = None) -> List[TextContent]:
     """
     Search for relevant documents using semantic vector search. Returns formatted text with document information.
     
     Use this tool to:
     - Find documents matching a query (e.g., company names, owners, directors, contracts, specifications, etc.)
     - Get relevant excerpts from documents with preview
+    - Search within specific documents by providing document IDs
     - Obtain document IDs for full content retrieval if needed
 
     Arguments:
@@ -27,6 +28,8 @@ async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
             - "contract terms, conditions and payment details"
             - "company registration and legal entity information"
         limit (int, optional): Maximum number of documents to return. Default is 10.
+        document_ids (List[str], optional): List of specific document IDs to search within. 
+            If provided, search will be limited to these documents only. Useful for large document collections.
 
     Returns:
         List[TextContent]: Formatted text containing:
@@ -41,7 +44,7 @@ async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
     If no results found, returns "No documents found matching query: 'query'".
     """
     try:
-        print(f"[SEARCH] Query: '{query}', limit: {limit}")
+        print(f"[SEARCH] Query: '{query}', limit: {limit}, document_ids: {document_ids}")
         
         async with app_container() as container:
             # Получаем зависимости
@@ -63,6 +66,7 @@ async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
                 query_vector=query_vector,
                 limit=limit * 3,  # Получаем больше результатов для группировки
                 similarity_threshold=0.4,
+                document_ids=document_ids  # Передаем фильтр по документам
             )
             
             print(f"[SEARCH] Found {len(search_results)} raw chunks")
@@ -140,7 +144,10 @@ async def search_documents(query: str, limit: int = 10) -> List[TextContent]:
           
             
             # Форматируем результат для LLM
-            response = f"📄 Found {len(results)} documents matching '{query}':\n\n"
+            if document_ids:
+                response = f"📄 Found {len(results)} documents matching '{query}' (search limited to {len(document_ids)} specified documents):\n\n"
+            else:
+                response = f"📄 Found {len(results)} documents matching '{query}':\n\n"
             
             for i, doc in enumerate(results, 1):
                 response += f"**{i}. {doc['filename']}**\n"
@@ -225,7 +232,7 @@ async def get_document_by_id(document_id: str, include_content: bool = False) ->
         )]
 
 
-async def get_document_full_content(document_id: str, chunk_size: int = 3000, chunk_index: int = 0) -> List[TextContent]:
+async def get_document_full_content(document_id: str, chunk_size: int = 1500, chunk_index: int = 0) -> List[TextContent]:
     """
     Get full document content in chunks for LLM processing.
     
@@ -236,7 +243,7 @@ async def get_document_full_content(document_id: str, chunk_size: int = 3000, ch
     
     Args:
         document_id: The unique ID of the document (UUID string from search results)
-        chunk_size: Size of each content chunk in characters (default: 3000)
+        chunk_size: Size of each content chunk in characters (default: 1500)
         chunk_index: Which chunk to retrieve (0-based, default: 0)
         
     Returns:

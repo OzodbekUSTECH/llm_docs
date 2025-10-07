@@ -5,7 +5,7 @@ OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_documents",
-            "description": "Search for relevant documents using semantic vector search. Returns formatted text with document information including filename, ID, size, preview, and relevance score. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information. Use this tool to find any factual information, data, or content from documents (e.g., company names, owners, directors, contracts, specifications, reports, etc.). The tool returns formatted results ready for display to users.",
+            "description": "Search for relevant documents using semantic vector search. Returns formatted text with document information including filename, ID, size, preview, and relevance score. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information. Use this tool to find any factual information, data, or content from documents (e.g., company names, owners, directors, contracts, specifications, reports, etc.). You can optionally limit the search to specific documents by providing their IDs. The tool returns formatted results ready for display to users.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -19,6 +19,13 @@ OPENAI_TOOLS = [
                         "default": 10,
                         "minimum": 1,
                         "maximum": 20
+                    },
+                    "document_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional list of specific document IDs to search within. If provided, search will be limited to these documents only. Useful for large document collections or when you want to focus on specific documents. Each ID should be a UUID string obtained from previous search results or query_documents."
                     }
                 },
                 "required": ["query"]

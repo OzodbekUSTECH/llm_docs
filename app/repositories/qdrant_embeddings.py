@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
-from qdrant_client.http.models import Distance, ScoredPoint, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.http.models import Distance, ScoredPoint, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, MatchAny
 import numpy as np
 
 
@@ -83,19 +83,31 @@ class QdrantEmbeddingsRepository:
         query_vector: List[float], 
         limit: int = 10,
         similarity_threshold: float = 0.7,
+        document_ids: Optional[List[str]] = None
     ) -> List[ScoredPoint]:
         """Поиск похожих чанков по вектору запроса"""
         await self.ensure_collection_exists()
         
+        # Создаем фильтр если указаны document_ids
+        search_filter = None
+        if document_ids:
+            search_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchAny(any=document_ids)
+                    )
+                ]
+            )
         
         search_result = await self.client.search(
             collection_name=self.COLLECTION_NAME,
             query_vector=query_vector,
             limit=limit,
             with_payload=True,
-            score_threshold=similarity_threshold
+            score_threshold=similarity_threshold,
+            query_filter=search_filter
         )
-        
         
         return search_result
     
