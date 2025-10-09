@@ -42,14 +42,21 @@ async def search_documents(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
     similarity_threshold: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity threshold"),
+    document_types: str = Query(None, description="Comma-separated list of document types to filter by"),
 ):
     """
     Поиск документов по текстовому запросу с использованием векторного поиска
     """
+    # Парсим document_types из строки в список
+    document_types_list = None
+    if document_types:
+        document_types_list = [dt.strip() for dt in document_types.split(',') if dt.strip()]
+    
     chunks_results = await search_documents_interactor.execute(
         query=query,
         limit=limit,
-        similarity_threshold=similarity_threshold
+        similarity_threshold=similarity_threshold,
+        document_types=document_types_list
     )
     
     # Группируем результаты по документам

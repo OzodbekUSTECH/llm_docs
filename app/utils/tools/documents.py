@@ -9,17 +9,21 @@ from app.di.containers import app_container
 from sentence_transformers import SentenceTransformer
 from app.dto.ai_models import TextContent
 from app.dto.pagination import InfiniteScrollRequest
+from app.utils.collections import Collections
+from qdrant_client.http.models import FieldCondition, MatchAny
+from app.dto.qdrant_filters import QdrantFilters
+from app.utils.enums import DocumentType
 
-
-async def search_documents(query: str, limit: int = 10, document_ids: Optional[List[str]] = None) -> List[TextContent]:
+async def search_documents(query: str, limit: int = 10, document_ids: Optional[List[str]] = None, document_types: Optional[List[str]] = None) -> List[TextContent]:
     """
-    Search for relevant documents using semantic vector search. Returns formatted text with document information.
+    Search for relevant documents using semantic vector search. Returns document metadata and keywords.
     
     Use this tool to:
     - Find documents matching a query (e.g., company names, owners, directors, contracts, specifications, etc.)
-    - Get relevant excerpts from documents with preview
+    - Get document metadata and extracted keywords
     - Search within specific documents by providing document IDs
-    - Obtain document IDs for full content retrieval if needed
+    - Obtain document IDs for further analysis if needed
+    - Documents are automatically categorized by type (INVOICE, CONTRACT, COO, COA, COW, BL, LC, FINANCIAL, OTHER)
 
     Arguments:
         query (str): Natural language search query. Be specific and descriptive. Examples:
@@ -27,9 +31,20 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
             - "vessel technical specifications and capabilities"
             - "contract terms, conditions and payment details"
             - "company registration and legal entity information"
+            - "invoice payment terms" - will find INVOICE type documents
+            - "certificate of origin" - will find COO type documents
+        
+        Usage with document_types parameter:
+            - search_documents("payment terms", document_types=["INVOICE"]) - only invoices
+            - search_documents("weight specifications", document_types=["COW", "COA"]) - certificates only
+            - search_documents("contract details", document_types=["CONTRACT", "BL"]) - contracts and bills of lading
         limit (int, optional): Maximum number of documents to return. Default is 10.
         document_ids (List[str], optional): List of specific document IDs to search within. 
             If provided, search will be limited to these documents only. Useful for large document collections.
+        document_types (List[str], optional): List of document types to filter by. Examples:
+            - ["INVOICE"] - only invoices
+            - ["CONTRACT", "INVOICE"] - only contracts and invoices
+            - ["COO", "COA", "COW"] - only certificates
 
     Returns:
         List[TextContent]: Formatted text containing:
@@ -37,19 +52,30 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
             - For each document:
                 - **N. filename** - Document name
                 - 🆔 ID: document_id | 📊 Size: file_size bytes
-                - 📅 Uploaded: upload_date
-                - 👁️ Preview: text preview with key fragments
+                - 📋 Type: document_type | 📄 Format: content_type
+                - 🔑 Keywords: extracted key information
                 - ⭐ Relevance: score (0.0-1.0)
+    
+    Document Types:
+        - INVOICE: Invoices and bills
+        - CONTRACT: Contracts and agreements
+        - COO: Certificate of Origin
+        - COA: Certificate of Analysis
+        - COW: Certificate of Weight
+        - BL: Bill of Lading
+        - FINANCIAL: Financial reports and statements
+        - OTHER: Other document types
     
     If no results found, returns "No documents found matching query: 'query'".
     """
     try:
-        print(f"[SEARCH] Query: '{query}', limit: {limit}, document_ids: {document_ids}")
+        print(f"[SEARCH] Query: '{query}', limit: {limit}, document_ids: {document_ids}, document_types: {document_types}")
         
         async with app_container() as container:
             # Получаем зависимости
             qdrant_embeddings_repository: QdrantEmbeddingsRepository = await container.get(QdrantEmbeddingsRepository)
             sentence_transformer: SentenceTransformer = await container.get(SentenceTransformer)
+            documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
             
             # Генерируем эмбеддинг для запроса с префиксом E5
             # ВАЖНО: E5 требует "query: " для запросов
@@ -61,12 +87,38 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                 show_progress_bar=False,
             )[0].tolist()
             
-            # Выполняем векторный поиск
+            # Создаем фильтры для поиска
+            filter_conditions = []
+            
+            # Фильтр по ID документов
+            if document_ids:
+                filter_conditions.append(
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchAny(any=document_ids)
+                    )
+                )
+            
+            # Фильтр по типам документов
+            if document_types:
+                filter_conditions.append(
+                    FieldCondition(
+                        key="document_type",
+                        match=MatchAny(any=document_types)
+                    )
+                )
+            
+            # Создаем объект фильтров если есть условия
+            filters = None
+            if filter_conditions:
+                filters = QdrantFilters(must=filter_conditions)
+            
             search_results = await qdrant_embeddings_repository.search_similar(
+                collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 query_vector=query_vector,
-                limit=limit * 3,  # Получаем больше результатов для группировки
-                similarity_threshold=0.4,
-                document_ids=document_ids  # Передаем фильтр по документам
+                limit=limit,
+                similarity_threshold=0.7,
+                filters=filters
             )
             
             print(f"[SEARCH] Found {len(search_results)} raw chunks")
@@ -77,83 +129,84 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                     text=f"No documents found matching query: '{query}'"
                 )]
             
-            # Группируем результаты по документам
-            documents_dict = {}
+            # Группируем результаты по документам и получаем максимальную схожесть
+            documents_scores = {}
             for result in search_results:
-                # ScoredPoint объект имеет атрибуты: id, score, payload
                 doc_id = result.payload.get("document_id")
-                if doc_id not in documents_dict:
-                    documents_dict[doc_id] = {
-                        "document_id": doc_id,
-                        "chunks": [],
+                if doc_id not in documents_scores:
+                    documents_scores[doc_id] = {
                         "max_similarity": 0,
                         "filename": result.payload.get("filename", ""),
                         "content_type": result.payload.get("content_type", ""),
+                        "document_type": result.payload.get("document_type", "OTHER"),
                     }
                 
-                # Сохраняем контент чанка
-                chunk_content = result.payload.get("chunk_content", "")
-                documents_dict[doc_id]["chunks"].append({
-                    "content": chunk_content,
-                    "similarity": result.score,
-                    "chunk_index": result.payload.get("chunk_index", 0)
-                })
-                
                 # Обновляем максимальную схожесть
-                if result.score > documents_dict[doc_id]["max_similarity"]:
-                    documents_dict[doc_id]["max_similarity"] = result.score
+                if result.score > documents_scores[doc_id]["max_similarity"]:
+                    documents_scores[doc_id]["max_similarity"] = result.score
+            
+            # Получаем документы из БД одним запросом
+            doc_ids = list(documents_scores.keys())
+            documents = await documents_repository.get_all(
+                where=[Document.id.in_(doc_ids)]
+            )
+            
+            # Создаем мапу id -> document для быстрого доступа
+            documents_map = {str(doc.id): doc for doc in documents}
             
             # Формируем результат для LLM
             results = []
-            for doc_id, doc_data in documents_dict.items():
-                # Сортируем чанки: сначала по схожести, потом по индексу
-                doc_data["chunks"].sort(
-                    key=lambda x: (-x["similarity"], x["chunk_index"])
-                )
+            for doc_id, doc_data in documents_scores.items():
+                doc = documents_map.get(doc_id)
+                if not doc:
+                    continue
                 
-                # Берем ТОП-3 чанка для превью
-                best_chunks = doc_data["chunks"][:3]
+                # Формируем ключевые слова для отображения
+                keywords_display = []
+                if doc.keywords:
+                    for key, value in doc.keywords.items():
+                        if isinstance(value, dict):
+                            keyword_value = value.get('value', '')
+                        else:
+                            keyword_value = str(value)
+                        if keyword_value:
+                            keywords_display.append(f"{key}: {keyword_value}")
                 
-                # Создаем превью из лучших чанков
-                preview_parts = []
-                for chunk in best_chunks:
-                    content = chunk["content"]
-                    if len(content) > 200:  # Ограничиваем превью
-                        content = content[:200] + "..."
-                    preview_parts.append(content)
-                
-                preview_text = " | ".join(preview_parts)
-                
-                # Подсчитываем примерный размер файла
-                total_chunk_length = sum(len(chunk["content"]) for chunk in doc_data["chunks"])
+                keywords_text = " | ".join(keywords_display[:5])  # Показываем только первые 5 ключевых слов
+                if len(keywords_display) > 5:
+                    keywords_text += f" ... and {len(keywords_display) - 5} more"
                 
                 results.append({
-                    "filename": doc_data["filename"],  # 📄 Название файла
-                    "id": doc_id,  # 🆔 ID документа
-                    "file_size": total_chunk_length,  # 📊 Размер файла в байтах
-                    "uploaded_at": "N/A",  # 📅 Дата загрузки (не доступна из Qdrant)
-                    "preview": preview_text,  # 👁️ Превью текста
-                    "relevance_score": round(doc_data["max_similarity"], 3),  # ⭐ Релевантность
-                    "content_type": doc_data["content_type"],  # Тип контента
-                    "chunks_count": len(doc_data["chunks"]),  # Количество найденных чанков
+                    "filename": doc.original_filename,
+                    "id": doc_id,
+                    "file_size": len(doc.content) if doc.content else 0,
+                    "keywords": keywords_text,
+                    "relevance_score": round(doc_data["max_similarity"], 3),
+                    "content_type": doc.content_type,
+                    "document_type": doc.type.value,
                 })
             
             # Сортируем по релевантности
             results.sort(key=lambda x: x["relevance_score"], reverse=True)
             
-          
-            
             # Форматируем результат для LLM
+            filter_info = []
             if document_ids:
-                response = f"📄 Found {len(results)} documents matching '{query}' (search limited to {len(document_ids)} specified documents):\n\n"
+                filter_info.append(f"limited to {len(document_ids)} specified documents")
+            if document_types:
+                filter_info.append(f"filtered by types: {', '.join(document_types)}")
+            
+            if filter_info:
+                response = f"📄 Found {len(results)} documents matching '{query}' ({' and '.join(filter_info)}):\n\n"
             else:
                 response = f"📄 Found {len(results)} documents matching '{query}':\n\n"
             
             for i, doc in enumerate(results, 1):
                 response += f"**{i}. {doc['filename']}**\n"
-                response += f"   🆔 ID: {doc['id']} | 📊 Size: {doc['file_size']:,} bytes\n"
-                response += f"   📅 Uploaded: {doc['uploaded_at']}\n"
-                response += f"   👁️ Preview: {doc['preview']}\n"
+                response += f"   🆔 ID: {doc['id']} | 📊 Size: {doc['file_size']:,} characters\n"
+                response += f"   📋 Type: {doc['document_type']} | 📄 Format: {doc['content_type']}\n"
+                if doc['keywords']:
+                    response += f"   🔑 Keywords: {doc['keywords']}\n"
                 response += f"   ⭐ Relevance: {doc['relevance_score']:.3f}\n\n"
             
             return [TextContent(type="text", text=response)]
@@ -166,21 +219,20 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
         )]
 
 
-async def get_document_by_id(document_id: str, include_content: bool = False) -> List[TextContent]:
+async def get_document_by_id(document_id: str) -> List[TextContent]:
     """
-    Get document information by document ID.
+    Get document information by document ID including metadata and keywords.
     
     Use this tool when you need:
     - Document metadata and basic information
-    - Truncated content preview (if include_content=True)
+    - Extracted keywords and their values
     - Document status and properties
     
     Args:
         document_id: The unique ID of the document (UUID string from search results)
-        include_content: If True, includes truncated content preview (max 2000 chars)
         
     Returns:
-        List[TextContent]: Formatted document information
+        List[TextContent]: Formatted document information with keywords
     """
     try:
         async with app_container() as container:
@@ -206,23 +258,20 @@ async def get_document_by_id(document_id: str, include_content: bool = False) ->
             response += f"**Filename:** {document.original_filename}\n"
             response += f"**ID:** {document_id}\n"
             response += f"**Content Type:** {document.content_type}\n"
+            response += f"**Document Type:** {document.type.value}\n"
             response += f"**Status:** {status}\n"
             response += f"**Content Length:** {content_length:,} characters\n"
             response += f"**File Hash:** {document.file_hash}\n"
             response += f"**Created At:** {created_at}\n"
             
-            if include_content and document.content:
-                # Добавляем обрезанный контент
-                truncated_content = document.content
-                if len(truncated_content) > 2000:
-                    truncated_content = truncated_content[:2000] + "..."
-                
-                response += f"\n**Content Preview:**\n"
-                response += f"```\n{truncated_content}\n```\n"
-                response += f"\n*Note: Content is truncated to 2000 characters. Use get_document_full_content for complete content.*"
+            # Добавляем ключевые слова если есть
+            if document.keywords:
+                response += f"\n**🔑 Extracted Keywords:**\n"
+                for key, value in document.keywords.items():
+                    if value:
+                        response += f"- **{key}**: {value}\n"
             else:
-                response += f"\n*Use get_document_full_content to retrieve the complete document content.*"
-            
+                response += f"\n**🔑 Keywords:** No keywords extracted\n"
             return [TextContent(type="text", text=response)]
             
     except Exception as e:
@@ -232,83 +281,6 @@ async def get_document_by_id(document_id: str, include_content: bool = False) ->
         )]
 
 
-async def get_document_full_content(document_id: str, chunk_size: int = 1500, chunk_index: int = 0) -> List[TextContent]:
-    """
-    Get full document content in chunks for LLM processing.
-    
-    Use this tool when you need:
-    - Complete document content (not truncated)
-    - Large documents that need to be processed in parts
-    - Full text analysis and processing
-    
-    Args:
-        document_id: The unique ID of the document (UUID string from search results)
-        chunk_size: Size of each content chunk in characters (default: 1500)
-        chunk_index: Which chunk to retrieve (0-based, default: 0)
-        
-    Returns:
-        List[TextContent]: Document content chunk with pagination info
-    """
-    try:
-        async with app_container() as container:
-            documents_repository: DocumentsRepository = await container.get(DocumentsRepository)
-            
-            # Получаем документ
-            document = await documents_repository.get_one(
-                where=[Document.id == document_id]
-            )
-            
-            if not document:
-                return [TextContent(
-                    type="text",
-                    text=f"❌ Document with ID {document_id} not found"
-                )]
-            
-            if not document.content:
-                return [TextContent(
-                    type="text",
-                    text=f"❌ Document '{document.original_filename}' has no content"
-                )]
-            
-            # Разбиваем контент на чанки
-            content = document.content
-            total_chunks = (len(content) + chunk_size - 1) // chunk_size  # Округление вверх
-            
-            if chunk_index >= total_chunks:
-                return [TextContent(
-                    type="text",
-                    text=f"❌ Chunk index {chunk_index} is out of range. Document has {total_chunks} chunks (0-{total_chunks-1})"
-                )]
-            
-            # Извлекаем нужный чанк
-            start_pos = chunk_index * chunk_size
-            end_pos = min(start_pos + chunk_size, len(content))
-            chunk_content = content[start_pos:end_pos]
-            
-            # Формируем ответ
-            response = f"📄 **Full Document Content - Chunk {chunk_index + 1}/{total_chunks}**\n\n"
-            response += f"**Document:** {document.original_filename}\n"
-            response += f"**ID:** {document_id}\n"
-            response += f"**Chunk Size:** {chunk_size} characters\n"
-            response += f"**Position:** {start_pos:,}-{end_pos:,} of {len(content):,} characters\n\n"
-            response += f"**Content:**\n```\n{chunk_content}\n```\n\n"
-            
-            # Добавляем информацию о навигации
-            if total_chunks > 1:
-                response += f"**Navigation:**\n"
-                if chunk_index > 0:
-                    response += f"- Previous chunk: chunk_index={chunk_index-1}\n"
-                if chunk_index < total_chunks - 1:
-                    response += f"- Next chunk: chunk_index={chunk_index+1}\n"
-                response += f"- All chunks: 0 to {total_chunks-1}\n"
-            
-            return [TextContent(type="text", text=response)]
-            
-    except Exception as e:
-        return [TextContent(
-            type="text",
-            text=f"❌ Error retrieving document content: {str(e)}"
-        )]
 
 
 async def query_documents(
@@ -323,7 +295,7 @@ async def query_documents(
     
     Use this tool when you need:
     - Count documents (e.g., "how many documents do I have?")
-    - Filter by status, content type, date range, etc.
+    - Filter by status, content type, document type, date range, etc.
     - Group documents by specific fields
     - Sort documents by various criteria
     - Get statistics about your document collection
@@ -333,6 +305,7 @@ async def query_documents(
             - status: DocumentStatus (PENDING, PROCESSING, COMPLETED, FAILED)
             - content_type: str (e.g., "application/pdf", "text/plain")
             - filename: str (partial match)
+            - document_type: DocumentType (e.g., INVOICE, CONTRACT, COO, COA, COW, BL, LC, FINANCIAL, OTHER)
             - original_filename: str (partial match)
             - created_after: str (ISO date, e.g., "2024-01-01")
             - created_before: str (ISO date, e.g., "2024-12-31")
@@ -359,7 +332,9 @@ async def query_documents(
                 
                 if "content_type" in filters:
                     where_conditions.append(Document.content_type == filters["content_type"])
-                
+                    
+                if "document_type" in filters:
+                    where_conditions.append(Document.type == DocumentType(filters["document_type"]))
                 if "filename" in filters:
                     where_conditions.append(Document.filename.ilike(f"%{filters['filename']}%"))
                 
@@ -476,7 +451,8 @@ async def query_documents(
                 response += f"**{i}. {doc.original_filename}**\n"
                 response += f"   🆔 ID: {doc.id}\n"
                 response += f"   📊 Status: {status}\n"
-                response += f"   📄 Type: {doc.content_type}\n"
+                response += f"   📄 Content Type: {doc.content_type}\n"
+                response += f"   📄 Document Type: {doc.type}\n"
                 response += f"   📏 Size: {content_length:,} characters\n"
                 response += f"   📅 Created: {created_at}\n\n"
             
@@ -486,6 +462,117 @@ async def query_documents(
         return [TextContent(
             type="text",
             text=f"❌ Error querying documents: {str(e)}"
+        )]
+
+
+async def search_documents_by_keywords(
+    keyword: str, 
+    value: str, 
+    document_types: Optional[List[str]] = None, 
+    limit: int = 10
+) -> List[TextContent]:
+    """
+    Search for documents by specific keywords extracted from their content.
+    
+    This tool allows you to find documents containing specific information like vessel names,
+    invoice numbers, contract details, etc. Use this when you need to find documents with
+    specific data points or values.
+    
+    Arguments:
+        keyword (str): The specific keyword to search for (e.g., 'vessel', 'invoice_number', 'contract_number', 'seller', 'buyer')
+        value (str): The value to search for within that keyword field. Can be partial match.
+        document_types (Optional[List[str]]): List of document types to search within. If not provided, searches all types.
+        limit (int): Maximum number of documents to return. Default is 10.
+    
+    Returns:
+        List[TextContent]: Formatted results with document information and matching keyword values.
+    """
+    try:
+        # Get repositories from DI container
+        async with app_container() as container:
+            documents_repository = await container.get(DocumentsRepository)
+            
+            # Build query conditions
+            conditions = []
+            
+            # Add document type filter if specified
+            if document_types:
+                conditions.append(Document.type.in_(document_types))
+            
+            # Get all documents matching the type filter
+            documents = await documents_repository.get_all(
+                where=conditions,
+                limit=limit
+            )
+            
+            # Filter documents by keyword value
+            matching_documents = []
+            for doc in documents:
+                if not doc.keywords:
+                    continue
+                    
+                # Check if the keyword exists and contains the value
+                if keyword in doc.keywords:
+                    keyword_data = doc.keywords[keyword]
+                    if isinstance(keyword_data, dict):
+                        keyword_value = keyword_data.get('value', '')
+                    else:
+                        keyword_value = str(keyword_data)
+                    
+                    # Check if the value matches (case-insensitive partial match)
+                    if value.lower() in keyword_value.lower():
+                        matching_documents.append((doc, keyword_value))
+            
+            # Limit results
+            matching_documents = matching_documents[:limit]
+            
+            if not matching_documents:
+                return [TextContent(
+                    type="text",
+                    text=f"🔍 No documents found with keyword '{keyword}' containing value '{value}'"
+                )]
+            
+            # Format results
+            response = f"🔍 **Found {len(matching_documents)} documents with keyword '{keyword}' containing '{value}'**\n\n"
+            
+            for i, (doc, keyword_value) in enumerate(matching_documents, 1):
+                # Format creation date
+                created_at = doc.created_at.strftime("%Y-%m-%d %H:%M") if doc.created_at else "Unknown"
+                
+                # Get document type icon and name
+                type_icons = {
+                    DocumentType.INVOICE: "📄",
+                    DocumentType.CONTRACT: "📋", 
+                    DocumentType.COO: "🌍",
+                    DocumentType.COA: "🧪",
+                    DocumentType.COW: "⚖️",
+                    DocumentType.COQ: "🏆",
+                    DocumentType.BL: "🚢",
+                    DocumentType.FINANCIAL: "💰",
+                    DocumentType.OTHER: "📁"
+                }
+                type_icon = type_icons.get(doc.type, "📄")
+                
+                response += f"**{i}. {type_icon} {doc.original_filename}**\n"
+                response += f"   🆔 ID: `{doc.id}`\n"
+                response += f"   📋 Type: {doc.type.value}\n"
+                response += f"   🔑 **{keyword}**: {keyword_value}\n"
+                response += f"   📅 Created: {created_at}\n"
+                
+                # Add context if available
+                if isinstance(doc.keywords.get(keyword), dict):
+                    context = doc.keywords[keyword].get('context')
+                    if context:
+                        response += f"   📝 Context: {context[:200]}{'...' if len(context) > 200 else ''}\n"
+                
+                response += "\n"
+            
+            return [TextContent(type="text", text=response)]
+        
+    except Exception as e:
+        return [TextContent(
+            type="text",
+            text=f"❌ Error searching documents by keywords: {str(e)}"
         )]
 
 

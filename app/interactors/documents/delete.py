@@ -3,6 +3,7 @@ from uuid import UUID
 from app.exceptions.app_error import AppError
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
+from app.utils.collections import Collections
 
 
 class DeleteDocumentInteractor:
@@ -19,7 +20,7 @@ class DeleteDocumentInteractor:
         if not document:
             raise AppError(status_code=404, message="Document not found")
         await self.documents_repository.delete(id)
-        await self.qdrant_embeddings_repository.delete_document_embeddings(str(id))
+        await self.qdrant_embeddings_repository.delete_document_embeddings(str(id), Collections.DOCUMENT_EMBEDDINGS)
         
         await self.uow.commit()
         return document

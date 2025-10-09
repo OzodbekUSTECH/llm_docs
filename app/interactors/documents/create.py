@@ -11,12 +11,13 @@ from app.entities.documents import Document
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.repositories.uow import UnitOfWork
-from app.utils.enums import DocumentStatus
+from app.utils.enums import DocumentStatus, DocumentType
 from app.exceptions.app_error import AppError
 from qdrant_client import AsyncQdrantClient
-
+from app.utils.collections import Collections
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
+from app.services.keyword_extractor import KeywordExtractor
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,8 @@ class CreateDocumentInteractor:
         sentence_transformer: SentenceTransformer,
         qdrant_client: AsyncQdrantClient,
         document_converter: DocumentConverter,
-        docling_chunker: HybridChunker
+        docling_chunker: HybridChunker,
+        keyword_extractor: KeywordExtractor
     ):
         self.uow = uow
         self.documents_repository = documents_repository
@@ -41,7 +43,117 @@ class CreateDocumentInteractor:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.document_converter = document_converter
         self.docling_chunker = docling_chunker
+        self.keyword_extractor = keyword_extractor
         
+    def _detect_document_type(self, filename: str, content: str) -> DocumentType:
+        """
+        Определяет тип документа на основе имени файла и содержимого.
+        
+        Args:
+            filename: Имя файла
+            content: Содержимое документа
+            
+        Returns:
+            DocumentType: Определенный тип документа
+        """
+        # Нормализуем текст для поиска
+        filename_lower = filename.lower()
+        content_lower = content.lower() if content else ""
+
+        # Keyword dictionaries for each document type (all in English, including COQ - Certificate of Quality)
+        type_keywords = {
+            DocumentType.INVOICE: {
+                'filename': ['invoice', 'bill', 'inv'],
+                'content': [
+                    'invoice', 'bill to', 'total amount', 'payment terms', 'due date',
+                    'invoice number', 'amount due', 'payable to'
+                ]
+            },
+            DocumentType.CONTRACT: {
+                'filename': ['contract', 'agreement'],
+                'content': [
+                    'hereby agree', 'parties agree', 'contract', 'agreement', 'terms and conditions',
+                    'this agreement', 'the parties', 'contract number'
+                ]
+            },
+            DocumentType.COO: {
+                'filename': ['coo', 'certificate of origin', 'origin'],
+                'content': [
+                    'certificate of origin', 'country of origin', 'goods originate', 'origin certificate',
+                    'place of origin', 'originating from'
+                ]
+            },
+            DocumentType.COA: {
+                'filename': ['coa', 'certificate of analysis', 'analysis'],
+                'content': [
+                    'certificate of analysis', 'test results', 'analytical results', 'specifications met',
+                    'analysis report', 'quality analysis'
+                ]
+            },
+            DocumentType.COW: {
+                'filename': ['cow', 'certificate of weight', 'weight certificate'],
+                'content': [
+                    'certificate of weight', 'gross weight', 'net weight', 'weight certificate',
+                    'total weight', 'weighing'
+                ]
+            },
+            DocumentType.COQ: {
+                'filename': ['coq', 'certificate of quality', 'quality certificate'],
+                'content': [
+                    'certificate of quality', 'quality certificate', 'quality assurance', 'quality control',
+                    'meets quality standards', 'quality test'
+                ]
+            },
+            DocumentType.BL: {
+                'filename': ['bl', 'bill of lading', 'lading'],
+                'content': [
+                    'bill of lading', 'consignee', 'shipper', 'vessel', 'port of loading', 'port of discharge',
+                    'lading number', 'cargo manifest'
+                ]
+            },
+            DocumentType.LC: {
+                'filename': ['lc', 'letter of credit', 'swift'],
+                'content': [
+                    'letter of credit', 'swift', 'bank', 'beneficiary', 'applicant', 'issuing bank'
+                ]
+            },
+            DocumentType.FINANCIAL: {
+                'filename': ['financial', 'report', 'statement', 'balance'],
+                'content': [
+                    'financial statement', 'balance sheet', 'income statement', 'cash flow', 'assets', 'liabilities',
+                    'profit and loss', 'statement of financial position'
+                ]
+            }
+        }
+        # Подсчитываем очки для каждого типа
+        scores = {}
+        
+        for doc_type, keywords in type_keywords.items():
+            score = 0
+            
+            # Проверяем ключевые слова в имени файла (больший вес)
+            for keyword in keywords['filename']:
+                if keyword in filename_lower:
+                    score += 3  # Имя файла имеет больший вес
+            
+            # Проверяем ключевые слова в содержимом
+            for keyword in keywords['content']:
+                if keyword in content_lower:
+                    score += 1
+            
+            scores[doc_type] = score
+        
+        # Находим тип с максимальным скором
+        max_score = max(scores.values()) if scores else 0
+        
+        if max_score > 0:
+            # Возвращаем тип с максимальным скором
+            detected_type = max(scores, key=scores.get)
+            logger.info(f"Detected document type: {detected_type.value} (score: {max_score})")
+            return detected_type
+        
+        logger.info("Could not detect specific document type, using OTHER")
+        return DocumentType.OTHER
         
     async def _extract_text_and_tables(self, file_path: str) -> Tuple[Optional[str], List[Dict]]:
         """Extract text content and tables from file using Docling"""
@@ -196,6 +308,18 @@ class CreateDocumentInteractor:
             if not content:
                 raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
             
+            # Определяем тип документа
+            detected_type = self._detect_document_type(file.filename, content)
+            
+            # Извлекаем ключевые слова с помощью OpenAI
+            logger.info(f"Extracting keywords for document type: {detected_type.value}")
+            try:
+                keywords = await self.keyword_extractor.extract_keywords(content, detected_type)
+                logger.info(f"Extracted {len(keywords)} keywords")
+            except Exception as e:
+                logger.error(f"Failed to extract keywords: {e}")
+                keywords = {}  # Продолжаем без ключевых слов
+            
             document = Document(
                 id=id,
                 filename=stored_filename,
@@ -206,6 +330,8 @@ class CreateDocumentInteractor:
                 status=DocumentStatus.COMPLETED,
                 content=content,
                 tables=tables,
+                type=detected_type,  # Добавляем определенный тип
+                keywords=keywords,  # Добавляем извлеченные ключевые слова
             )
             await self.documents_repository.create(document)
             
@@ -220,6 +346,7 @@ class CreateDocumentInteractor:
             )
             
             await self.qdrant_embeddings_repository.bulk_create_embeddings(
+                collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 document_id=str(document.id),
                 chunks=chunks,  # Сохраняем БЕЗ префикса
                 embeddings=embeddings.tolist(),
@@ -227,6 +354,7 @@ class CreateDocumentInteractor:
                 metadata={
                     "filename": document.original_filename,
                     "content_type": file.content_type,
+                    "document_type": detected_type.value,  # Добавляем тип документа
                 }
             )
             

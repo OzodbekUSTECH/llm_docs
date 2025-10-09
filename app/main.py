@@ -32,6 +32,23 @@ def create_app():
     )
     setup_dishka(app_container, app)
     
+    # Добавляем маршруты для HTML страниц ПЕРЕД API роутами (для правильного приоритета)
+    @app.get("/login", include_in_schema=False)
+    async def login_page():
+        return FileResponse("templates/login.html")
+    
+    @app.get("/", include_in_schema=False)
+    async def read_root():
+        return FileResponse("templates/chat.html")
+    
+    @app.get("/documents/page", include_in_schema=False)
+    async def documents_page():
+        return FileResponse("templates/documents.html")
+    
+    @app.get("/rules/page", include_in_schema=False)
+    async def rules_page():
+        return FileResponse("templates/rules.html")
+    
     # Регистрируем auth router ДО middleware
     app.include_router(auth.router)
     
@@ -41,19 +58,6 @@ def create_app():
     register_middlewares(app)
     register_exceptions(app)
     register_routers(app)
-    
-    # Добавляем маршруты для страниц
-    @app.get("/login", include_in_schema=False)
-    async def login_page():
-        return FileResponse("templates/login.html")
-    
-    @app.get("/", include_in_schema=False)
-    async def read_root():
-        return FileResponse("templates/chat.html")
-    
-    @app.get("/documents", include_in_schema=False)
-    async def documents_page():
-        return FileResponse("templates/documents.html")
     
     # Подключаем статические файлы (если они есть)
     app.mount("/storage", StaticFiles(directory="storage"), name="storage")

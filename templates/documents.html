@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -33,52 +33,71 @@
         /* Header */
         .header {
             background: var(--main-bg);
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            border-bottom: 2px solid var(--border-color);
+            position: relative;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
 
         .header-content {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 16px 24px;
+            padding: 20px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 20px;
         }
 
         .header-title {
-            font-size: 18px;
+            font-size: 24px;
             font-weight: 600;
             color: var(--text-primary);
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 8px;
         }
 
         .back-link {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 16px;
+            padding: 10px 18px;
             color: var(--text-secondary);
             text-decoration: none;
             border-radius: 8px;
             font-size: 14px;
+            font-weight: 500;
             transition: all 0.2s;
+            border: 1px solid var(--border-color);
+            background: var(--main-bg);
         }
 
         .back-link:hover {
             background: var(--hover-bg);
             color: var(--text-primary);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .back-link.active {
+            background: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
         }
 
         /* Tabs */
         .tabs {
             background: var(--main-bg);
             border-bottom: 1px solid var(--border-color);
+            position: relative;
+            z-index: 100;
         }
 
         .tabs-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 0 24px;
             display: flex;
@@ -108,7 +127,7 @@
 
         /* Main Container */
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 32px 24px;
         }
@@ -700,10 +719,23 @@
             }
 
             .header-content {
-                padding: 12px 16px;
+                padding: 16px;
                 flex-direction: column;
-                align-items: flex-start;
-                gap: 12px;
+                align-items: stretch;
+                gap: 16px;
+            }
+
+            .header-title {
+                font-size: 20px;
+            }
+
+            .nav-buttons {
+                flex-direction: column;
+            }
+
+            .back-link {
+                justify-content: center;
+                width: 100%;
             }
 
             .tabs-container {
@@ -938,23 +970,140 @@
             white-space: pre-wrap;
             word-break: break-word;
         }
+
+        .keywords-section {
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        .keywords-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .keyword-item {
+            background: var(--main-bg);
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+        }
+
+        .keyword-item:hover {
+            background: var(--hover-bg);
+            border-color: var(--accent-color);
+        }
+
+        .keyword-key {
+            font-weight: 600;
+            color: var(--accent-color);
+            font-size: 14px;
+            margin-bottom: 4px;
+            text-transform: capitalize;
+        }
+
+        .keyword-value {
+            color: var(--text-primary);
+            font-size: 14px;
+            margin-bottom: 6px;
+            word-break: break-word;
+        }
+
+        .keyword-context {
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-style: italic;
+            line-height: 1.4;
+            background: var(--bg-primary);
+            padding: 6px 8px;
+            border-radius: 4px;
+            border-left: 3px solid var(--accent-color);
+        }
+
+        /* Keywords in document list */
+        .document-keywords {
+            margin: 12px 0;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .keywords-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-color);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .keywords-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .keyword-tag {
+            display: inline-block;
+            background: var(--main-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .keyword-tag strong {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .keyword-more {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-style: italic;
+            background: var(--bg-primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        .no-keywords {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
     <!-- Header -->
     <div class="header">
         <div class="header-content">
-            <h1 class="header-title">📚 Документы</h1>
-            <a href="/" class="back-link">← Вернуться к чату</a>
+            <h1 class="header-title">📚 Documents</h1>
+            <div class="nav-buttons">
+                <a href="/" class="back-link">💬 Chat</a>
+                <a href="/documents/page" class="back-link active">📚 Documents</a>
+                <a href="/rules/page" class="back-link">📋 Rules</a>
+            </div>
         </div>
     </div>
 
     <!-- Tabs -->
     <div class="tabs">
         <div class="tabs-container">
-            <button class="tab active" data-tab="upload">Загрузка</button>
-            <button class="tab" data-tab="list">Все документы</button>
-            <button class="tab" data-tab="search">Поиск</button>
+            <button class="tab active" data-tab="upload">Upload</button>
+            <button class="tab" data-tab="list">All Documents</button>
+            <button class="tab" data-tab="search">Search</button>
         </div>
     </div>
 
@@ -964,9 +1113,9 @@
         <div class="tab-content active" id="upload-tab">
             <div class="upload-section" id="upload-zone">
                 <div class="upload-icon">📁</div>
-                <div class="upload-title">Загрузить документ</div>
-                <div class="upload-subtitle">Перетащите файл сюда или нажмите кнопку ниже</div>
-                <button class="upload-button" id="select-file-button">Выбрать файл</button>
+                <div class="upload-title">Upload Document</div>
+                <div class="upload-subtitle">Drag and drop your file here or click the button below</div>
+                <button class="upload-button" id="select-file-button">Choose File</button>
                 <input type="file" id="file-input" class="file-input" accept=".pdf,.txt,.doc,.docx">
             </div>
 
@@ -974,17 +1123,17 @@
                 <div class="progress-bar-container">
                     <div class="progress-bar" id="progress-bar"></div>
                 </div>
-                <div class="progress-text" id="progress-text">Загрузка...</div>
+                <div class="progress-text" id="progress-text">Uploading...</div>
         </div>
 
             <div id="upload-message" class="upload-message"></div>
 
             <div class="upload-info">
-                <h3>ℹ️ Поддерживаемые форматы</h3>
+                <h3>ℹ️ Supported Formats</h3>
                 <ul>
-                    <li>PDF документы (.pdf)</li>
-                    <li>Текстовые файлы (.txt)</li>
-                    <li>Word документы (.doc, .docx)</li>
+                    <li>PDF documents (.pdf)</li>
+                    <li>Text files (.txt)</li>
+                    <li>Word documents (.doc, .docx)</li>
                 </ul>
             </div>
         </div>
@@ -994,7 +1143,7 @@
             <div id="documents-list-container">
                 <div class="loading">
                     <div class="loading-spinner"></div>
-                    <div>Загрузка документов...</div>
+                    <div>Loading documents...</div>
                 </div>
             </div>
 
@@ -1009,17 +1158,32 @@
                     type="text" 
                     class="search-input" 
                     id="search-input" 
-                    placeholder="Введите поисковый запрос..."
+                    placeholder="Enter search query..."
                     required
                 >
                 <button type="submit" class="search-button" id="search-button">
-                    🔍 Поиск
+                    🔍 Search
                 </button>
             </form>
 
             <div class="filters">
                 <div class="filter-group">
-                    <label class="filter-label">Лимит результатов</label>
+                    <label class="filter-label">Document Type</label>
+                    <select class="filter-input" id="document-type-input">
+                        <option value="">All Types</option>
+                        <option value="INVOICE">📄 Invoices (INVOICE)</option>
+                        <option value="CONTRACT">📋 Contracts (CONTRACT)</option>
+                        <option value="COO">🌍 Certificate of Origin (COO)</option>
+                        <option value="COA">🧪 Certificate of Analysis (COA)</option>
+                        <option value="COW">⚖️ Certificate of Weight (COW)</option>
+                        <option value="BL">🚢 Bill of Lading (BL)</option>
+                        <option value="LC">💳 Letter of Credit (LC)</option>
+                        <option value="FINANCIAL">💰 Financial Reports (FINANCIAL)</option>
+                        <option value="OTHER">📁 Other (OTHER)</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label class="filter-label">Results Limit</label>
                     <input 
                         type="number" 
                         class="filter-input" 
@@ -1030,7 +1194,7 @@
                     >
                 </div>
                 <div class="filter-group">
-                    <label class="filter-label">Порог сходства</label>
+                    <label class="filter-label">Similarity Threshold</label>
                     <input 
                         type="number" 
                         class="filter-input" 
@@ -1047,8 +1211,8 @@
             <div id="search-results-container">
                 <div class="empty-state">
                     <div class="empty-state-icon">🔍</div>
-                    <h3>Начните поиск</h3>
-                    <p>Введите поисковый запрос выше, чтобы найти релевантные документы</p>
+                    <h3>Start Searching</h3>
+                    <p>Enter a search query above to find relevant documents</p>
                 </div>
             </div>
         </div>
@@ -1058,7 +1222,7 @@
     <div class="modal" id="document-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 class="modal-title" id="modal-title">Просмотр документа</h3>
+                <h3 class="modal-title" id="modal-title">Document Viewer</h3>
                 <button class="modal-close" id="modal-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -1104,6 +1268,7 @@
                 this.searchButton = document.getElementById('search-button');
                 this.limitInput = document.getElementById('limit-input');
                 this.similarityInput = document.getElementById('similarity-input');
+                this.documentTypeInput = document.getElementById('document-type-input');
                 this.searchResultsContainer = document.getElementById('search-results-container');
 
                 // Modal
@@ -1191,7 +1356,7 @@
                 const fileExt = '.' + file.name.split('.').pop().toLowerCase();
                 
                 if (!allowedTypes.includes(fileExt)) {
-                    this.showMessage('error', '❌ Неподдерживаемый формат файла. Пожалуйста, загрузите PDF, TXT или DOC файл.');
+                    this.showMessage('error', '❌ Unsupported file format. Please upload a PDF, TXT, or DOC file.');
                     return;
                 }
 
@@ -1210,7 +1375,7 @@
                         progress += 10;
                         if (progress <= 90) {
                             this.progressBar.style.width = progress + '%';
-                            this.progressText.textContent = `Загрузка... ${progress}%`;
+                            this.progressText.textContent = `Uploading... ${progress}%`;
                         }
                     }, 100);
 
@@ -1221,7 +1386,7 @@
 
                     clearInterval(progressInterval);
                     this.progressBar.style.width = '100%';
-                    this.progressText.textContent = 'Обработка файла...';
+                    this.progressText.textContent = 'Processing file...';
 
                     if (!response.ok) {
                         const errorData = await response.json();
@@ -1229,14 +1394,14 @@
                     }
 
                     const result = await response.json();
-                    this.showMessage('success', '✅ Файл успешно загружен и обработан!');
+                    this.showMessage('success', '✅ File uploaded and processed successfully!');
                     this.fileInput.value = '';
                     
-                    // Показываем кнопку перехода к списку документов
+                    // Show button to navigate to document list
                     setTimeout(() => {
                         const viewButton = document.createElement('button');
                         viewButton.className = 'upload-button';
-                        viewButton.textContent = 'Перейти к списку документов';
+                        viewButton.textContent = 'Go to Documents List';
                         viewButton.style.marginTop = '16px';
                         viewButton.onclick = () => this.switchTab('list');
                         
@@ -1247,7 +1412,7 @@
                     }, 100);
                 } catch (error) {
                     console.error('Upload error:', error);
-                    this.showMessage('error', '❌ Ошибка загрузки: ' + error.message);
+                    this.showMessage('error', '❌ Upload error: ' + error.message);
                 } finally {
                     this.selectFileButton.disabled = false;
                     setTimeout(() => {
@@ -1267,7 +1432,7 @@
                 this.documentsListContainer.innerHTML = `
                     <div class="loading">
                         <div class="loading-spinner"></div>
-                        <div>Загрузка документов...</div>
+                        <div>Loading documents...</div>
                     </div>
                 `;
 
@@ -1285,7 +1450,7 @@
                     console.error('Load error:', error);
                     this.documentsListContainer.innerHTML = `
                         <div class="error">
-                            <strong>Ошибка:</strong> ${error.message}
+                            <strong>Error:</strong> ${error.message}
                         </div>
                     `;
                 }
@@ -1306,7 +1471,7 @@
                 paginationHTML += `
                     <button class="pagination-button" ${currentPage === 1 ? 'disabled' : ''} 
                         onclick="documentsApp.loadDocuments(${currentPage - 1})">
-                        ← Назад
+                        ← Previous
                     </button>
                 `;
 
@@ -1332,7 +1497,7 @@
                 paginationHTML += `
                     <button class="pagination-button" ${currentPage === totalPages ? 'disabled' : ''} 
                         onclick="documentsApp.loadDocuments(${currentPage + 1})">
-                        Вперед →
+                        Next →
                     </button>
                 `;
 
@@ -1346,8 +1511,8 @@
                     container.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">📄</div>
-                            <h3>Нет документов</h3>
-                            <p>Загрузите документы через чат, используя команду загрузки файлов</p>
+                            <h3>No Documents</h3>
+                            <p>Upload documents through the chat using file upload commands</p>
                         </div>
                     `;
                     return;
@@ -1360,13 +1525,31 @@
                         <div class="similarity-badge">${(doc.max_similarity * 100).toFixed(1)}%</div>
                     ` : '';
 
-                    const content = context === 'search' && doc.best_chunks && doc.best_chunks[0] ? 
-                        this.escapeHtml(doc.best_chunks[0].content.substring(0, 150) + '...') : 
-                        (doc.content ? this.escapeHtml(doc.content.substring(0, 150) + '...') : 'Нет содержимого');
-
-                    // Для результатов поиска добавляем информацию о количестве найденных фрагментов
+                    // For search results, add information about the number of found fragments
                     const chunksInfo = context === 'search' && doc.chunks_count > 1 ? 
-                        ` • ${doc.chunks_count} фрагментов` : '';
+                        ` • ${doc.chunks_count} fragments` : '';
+                    
+                    const documentTypeIcon = this.getDocumentTypeIcon(doc.type);
+                    const documentTypeName = this.getDocumentTypeName(doc.type);
+                    
+                    // Display keywords instead of content in list view
+                    let keywordsDisplay = '';
+                    if (doc.keywords && Object.keys(doc.keywords).length > 0) {
+                        const keywordsArray = [];
+                        for (const [key, value] of Object.entries(doc.keywords)) {
+                            const displayValue = typeof value === 'object' && value.value ? value.value : value;
+                            if (displayValue) {
+                                keywordsArray.push(`<span class="keyword-tag"><strong>${key}:</strong> ${this.escapeHtml(displayValue)}</span>`);
+                            }
+                        }
+                        // Show only first 3 keywords in list view
+                        keywordsDisplay = keywordsArray.slice(0, 3).join(' ');
+                        if (keywordsArray.length > 3) {
+                            keywordsDisplay += ` <span class="keyword-more">+${keywordsArray.length - 3} more</span>`;
+                        }
+                    } else {
+                        keywordsDisplay = '<span class="no-keywords">No keywords extracted</span>';
+                    }
                     
                     return `
                         <div class="document-card" data-doc-id="${docId}">
@@ -1374,26 +1557,27 @@
                                 <div style="flex: 1;">
                                     <div class="document-title">${this.escapeHtml(doc.original_filename || doc.filename)}</div>
                                     <div class="document-meta">
-                                        ${doc.content_type || 'Неизвестный тип'} • 
-                                        ${new Date(doc.created_at).toLocaleDateString('ru-RU')}${chunksInfo}
+                                        ${documentTypeIcon} ${documentTypeName} • ${doc.content_type || 'Unknown Type'} • 
+                                        ${new Date(doc.created_at).toLocaleDateString('en-US')}${chunksInfo}
                                     </div>
                                 </div>
                                 ${similarity}
                             </div>
                             
-                            <div class="document-content">
-                                ${content}
+                            <div class="document-keywords">
+                                <div class="keywords-label">🔑 Keywords:</div>
+                                <div class="keywords-content">${keywordsDisplay}</div>
                             </div>
                             
                             <div class="document-actions">
                                 <button class="action-button primary" onclick="documentsApp.viewDocument('${docId}')">
-                                    📄 Просмотр
+                                    📄 View Details
                                 </button>
                                 <button class="action-button" onclick="documentsApp.downloadDocument('${docId}')">
-                                    💾 Скачать
+                                    💾 Download
                                 </button>
                                 <button class="action-button danger" onclick="documentsApp.deleteDocument('${docId}')">
-                                    🗑️ Удалить
+                                    🗑️ Delete
                                 </button>
                             </div>
                         </div>
@@ -1410,19 +1594,23 @@
 
                 const limit = parseInt(this.limitInput.value);
                 const similarity = parseFloat(this.similarityInput.value);
+                const documentType = this.documentTypeInput.value;
 
                 this.searchButton.disabled = true;
                 this.searchResultsContainer.innerHTML = `
                         <div class="loading">
                             <div class="loading-spinner"></div>
-                            <div>Поиск документов...</div>
+                            <div>Searching documents...</div>
                         </div>
                     `;
 
                 try {
-                    const response = await fetch(
-                        `/documents/search?query=${encodeURIComponent(query)}&limit=${limit}&similarity_threshold=${similarity}`
-                    );
+                    let searchUrl = `/documents/search?query=${encodeURIComponent(query)}&limit=${limit}&similarity_threshold=${similarity}`;
+                    if (documentType) {
+                        searchUrl += `&document_types=${encodeURIComponent(documentType)}`;
+                    }
+                    
+                    const response = await fetch(searchUrl);
                     
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -1435,8 +1623,8 @@
                         this.searchResultsContainer.innerHTML = `
                             <div class="empty-state">
                                 <div class="empty-state-icon">🔍</div>
-                                <h3>Ничего не найдено</h3>
-                                <p>Попробуйте изменить поисковый запрос или снизить порог сходства</p>
+                                <h3>Nothing Found</h3>
+                                <p>Try changing your search query or lowering the similarity threshold</p>
                             </div>
                         `;
                     } else {
@@ -1446,7 +1634,7 @@
                     console.error('Search error:', error);
                     this.searchResultsContainer.innerHTML = `
                     <div class="error">
-                            <strong>Ошибка поиска:</strong> ${error.message}
+                            <strong>Search Error:</strong> ${error.message}
                     </div>
                 `;
                 } finally {
@@ -1456,8 +1644,8 @@
 
             // Document actions
             async viewDocument(id) {
-                this.modalTitle.textContent = 'Просмотр документа';
-                this.modalContent.innerHTML = '<div class="loading"><div class="loading-spinner"></div><div>Загрузка...</div></div>';
+                this.modalTitle.textContent = 'Document Viewer';
+                this.modalContent.innerHTML = '<div class="loading"><div class="loading-spinner"></div><div>Loading...</div></div>';
                 this.modal.classList.add('show');
 
                 try {
@@ -1470,24 +1658,55 @@
                     const doc = await response.json();
                     this.modalTitle.textContent = doc.original_filename || doc.filename;
 
+                    const documentTypeIcon = this.getDocumentTypeIcon(doc.type);
+                    const documentTypeName = this.getDocumentTypeName(doc.type);
+                    
                     let content = `
                         <div class="metadata-section">
-                            <div class="section-title">📋 Информация о документе</div>
-                            <div><strong>Файл:</strong> ${this.escapeHtml(doc.filename)}</div>
-                            <div><strong>Оригинальное имя:</strong> ${this.escapeHtml(doc.original_filename)}</div>
-                            <div><strong>Тип:</strong> ${this.escapeHtml(doc.content_type)}</div>
-                            <div><strong>Статус:</strong> ${this.escapeHtml(doc.status)}</div>
-                            <div><strong>Создан:</strong> ${new Date(doc.created_at).toLocaleString('ru-RU')}</div>
+                            <div class="section-title">📋 Document Information</div>
+                            <div><strong>File:</strong> ${this.escapeHtml(doc.filename)}</div>
+                            <div><strong>Original Name:</strong> ${this.escapeHtml(doc.original_filename)}</div>
+                            <div><strong>Document Type:</strong> ${documentTypeIcon} ${documentTypeName}</div>
+                            <div><strong>File Format:</strong> ${this.escapeHtml(doc.content_type)}</div>
+                            <div><strong>Status:</strong> ${this.escapeHtml(doc.status)}</div>
+                            <div><strong>Created:</strong> ${new Date(doc.created_at).toLocaleString('en-US')}</div>
                             ${doc.doc_metadata && doc.doc_metadata.parsing_method ? 
-                                `<div><strong>Метод парсинга:</strong> ${this.escapeHtml(doc.doc_metadata.parsing_method)}</div>` : ''}
+                                `<div><strong>Parsing Method:</strong> ${this.escapeHtml(doc.doc_metadata.parsing_method)}</div>` : ''}
                         </div>
                     `;
 
-                    // ВСЕГДА показываем markdown контент - он самый полный и читаемый
+                    // Add keywords section if available
+                    if (doc.keywords && Object.keys(doc.keywords).length > 0) {
+                        content += `
+                            <div class="keywords-section">
+                                <div class="section-title">🔑 Extracted Keywords</div>
+                                <div class="keywords-grid">
+                        `;
+                        
+                        for (const [key, value] of Object.entries(doc.keywords)) {
+                            const displayValue = typeof value === 'object' && value.value ? value.value : value;
+                            const context = typeof value === 'object' && value.context ? value.context : '';
+                            
+                            content += `
+                                <div class="keyword-item">
+                                    <div class="keyword-key">${this.escapeHtml(key)}</div>
+                                    <div class="keyword-value">${this.escapeHtml(displayValue)}</div>
+                                    ${context ? `<div class="keyword-context">${this.escapeHtml(context.substring(0, 100))}${context.length > 100 ? '...' : ''}</div>` : ''}
+                                </div>
+                            `;
+                        }
+                        
+                        content += `
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Always show markdown content - it's the most complete and readable
                     if (doc.content) {
                         content += `
                             <div class="content-section">
-                                <div class="section-title">📄 Содержимое документа</div>
+                                <div class="section-title">📄 Document Content</div>
                                 <div class="markdown-content">${this.renderMarkdown(doc.content)}</div>
                             </div>
                         `;
@@ -1495,7 +1714,7 @@
                         content += `
                             <div class="empty-state">
                                 <div class="empty-state-icon">📄</div>
-                                <p>Контент не найден</p>
+                                <p>Content not found</p>
                             </div>
                         `;
                     }
@@ -1696,13 +1915,13 @@
 
                 let html = `
                     <div class="tables-section">
-                        <div class="section-title">📊 Таблицы (${tables.length})</div>
+                        <div class="section-title">📊 Tables (${tables.length})</div>
                 `;
 
                 tables.forEach((table, i) => {
                     html += `
                         <div class="table-item">
-                            <div class="table-header">Таблица ${i + 1}</div>
+                            <div class="table-header">Table ${i + 1}</div>
                             <div class="table-content">${this.escapeHtml(table.text || JSON.stringify(table))}</div>
                         </div>
                     `;
@@ -1730,12 +1949,12 @@
                     document.body.removeChild(a);
                 } catch (error) {
                     console.error('Download error:', error);
-                    alert('Ошибка скачивания: ' + error.message);
+                    alert('Download error: ' + error.message);
                 }
             }
 
             async deleteDocument(id) {
-                if (!confirm('Вы уверены, что хотите удалить этот документ?')) {
+                if (!confirm('Are you sure you want to delete this document?')) {
                     return;
                 }
 
@@ -1755,15 +1974,45 @@
                         this.searchDocuments();
                     }
 
-                    alert('✅ Документ успешно удален');
+                    alert('✅ Document deleted successfully');
                 } catch (error) {
                     console.error('Delete error:', error);
-                    alert('Ошибка удаления: ' + error.message);
+                    alert('Delete error: ' + error.message);
                 }
             }
 
             closeModal() {
                 this.modal.classList.remove('show');
+            }
+
+            getDocumentTypeIcon(type) {
+                const icons = {
+                    'INVOICE': '📄',
+                    'CONTRACT': '📋',
+                    'COO': '🌍',
+                    'COA': '🧪',
+                    'COW': '⚖️',
+                    'BL': '🚢',
+                    'LC': '💳',
+                    'FINANCIAL': '💰',
+                    'OTHER': '📁'
+                };
+                return icons[type] || '📁';
+            }
+
+            getDocumentTypeName(type) {
+                const names = {
+                    'INVOICE': 'Invoice',
+                    'CONTRACT': 'Contract',
+                    'COO': 'Certificate of Origin',
+                    'COA': 'Certificate of Analysis',
+                    'COW': 'Certificate of Weight',
+                    'BL': 'Bill of Lading',
+                    'LC': 'Letter of Credit',
+                    'FINANCIAL': 'Financial Report',
+                    'OTHER': 'Other'
+                };
+                return names[type] || 'Other';
             }
 
             escapeHtml(text) {

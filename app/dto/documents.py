@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import or_
 from app.dto.common import BaseModelResponse, TimestampResponse
 from app.entities.documents import Document
-from app.utils.enums import DocumentStatus
+from app.utils.enums import DocumentStatus, DocumentType
 from app.dto.pagination import PaginationRequest
 
 
@@ -13,10 +13,11 @@ class BaseDocumentResponse(BaseModelResponse):
     file_path: str
     content_type: str
     status: DocumentStatus
+    type: DocumentType
     
     
 class DocumentListResponse(BaseDocumentResponse, TimestampResponse):
-    pass
+    keywords: Optional[dict] = None
     
     
 class DocumentResponse(DocumentListResponse):
@@ -29,6 +30,7 @@ class DocumentResponse(DocumentListResponse):
 class GetDocumentsParams(PaginationRequest):
     status: Optional[DocumentStatus] = None
     filename: Optional[str] = None
+    type: Optional[DocumentType] = None
     
     
     class Constants:
@@ -38,6 +40,7 @@ class GetDocumentsParams(PaginationRequest):
                 Document.filename == value,
                 Document.original_filename == value
             ),
+            "type": lambda value: Document.type == value,
         }
         orderable_fields = {
             "created_at": Document.created_at,

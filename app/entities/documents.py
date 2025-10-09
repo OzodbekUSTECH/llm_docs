@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from app.entities.mixins.timestamp_mixin import TimestampMixin
 from typing import TYPE_CHECKING, List, Optional, Dict, Any
 from app.entities.mixins.id_mixin import IdMixin
-from app.utils.enums import DocumentStatus
+from app.utils.enums import DocumentStatus, DocumentType
     
 class Document(Base,IdMixin, TimestampMixin):
     __tablename__ = "documents"
@@ -26,7 +26,7 @@ class Document(Base,IdMixin, TimestampMixin):
     content: Mapped[str]
     tables: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB, nullable=True)
     doc_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    
-    
+    type: Mapped[DocumentType] = mapped_column(default=DocumentType.OTHER)
+    keywords: Mapped[Dict[str, Any]] = mapped_column(JSONB, default=dict,server_default="{}")
     
     

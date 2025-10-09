@@ -82,6 +82,39 @@
             background: var(--hover-bg);
         }
 
+        .sidebar-nav {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .sidebar-nav-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: var(--accent-color);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
+        }
+
+        .sidebar-nav-btn:hover {
+            background: #0d8a6b;
+            transform: translateX(2px);
+            box-shadow: 0 4px 8px rgba(16, 163, 127, 0.3);
+        }
+
+        .sidebar-nav-btn span:first-child {
+            font-size: 18px;
+        }
+
         .chats-list {
             flex: 1;
             overflow-y: auto;
@@ -192,11 +225,34 @@
             gap: 4px;
             padding: 6px 12px;
             border-radius: 6px;
-            transition: background-color 0.2s;
+            transition: all 0.2s;
         }
 
         .session-info a:hover {
             background: var(--hover-bg);
+        }
+
+        .nav-btn {
+            background: var(--accent-color) !important;
+            color: white !important;
+            font-weight: 500;
+            padding: 8px 16px !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 4px rgba(16, 163, 127, 0.2);
+        }
+
+        .nav-btn:hover {
+            background: #0d8a6b !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(16, 163, 127, 0.3);
+        }
+
+        .logout-btn {
+            color: #ef4444 !important;
+        }
+
+        .logout-btn:hover {
+            background: #fef2f2 !important;
         }
 
         .chat-messages {
@@ -425,7 +481,7 @@
             border-bottom: none;
         }
 
-        /* Wrapper для больших таблиц с горизонтальным скроллом */
+        /* Wrapper for large tables with horizontal scroll */
         .message-text .table-wrapper {
             width: 100%;
             overflow-x: auto;
@@ -1572,6 +1628,16 @@
                     <span>New Chat</span>
                 </button>
             </div>
+            <div class="sidebar-nav">
+                <a href="/documents/page" class="sidebar-nav-btn">
+                    <span>📚</span>
+                    <span>Documents</span>
+                </a>
+                <a href="/rules/page" class="sidebar-nav-btn">
+                    <span>📋</span>
+                    <span>Rules</span>
+                </a>
+            </div>
             <div class="chats-list" id="chats-list">
                 <!-- Chats are loaded dynamically -->
             </div>
@@ -1582,9 +1648,10 @@
             <div class="chat-header">
                 <div class="chat-title">🤖 AI Chat Assistant (OpenAI RAG)</div>
                 <div class="session-info">
-                    <a href="/documents" style="color: #10a37f; text-decoration: none; margin-right: 16px;">📚 Documents</a>
+                    <a href="/documents/page" class="nav-btn">📚 Documents</a>
+                    <a href="/rules/page" class="nav-btn">📋 Rules</a>
                     <span style="margin-right: 16px;">👤 <span id="username">admin</span></span>
-                    <a href="#" id="logoutBtn" style="color: #ef4444; text-decoration: none;">🚪 Logout</a>
+                    <a href="#" id="logoutBtn" class="logout-btn">🚪 Logout</a>
                 </div>
             </div>
 
@@ -1687,13 +1754,13 @@
                     this.createNewChat();
                 });
 
-                // Сохраняем выбранную модель
+                // Save selected model
                 this.modelSelect.addEventListener('change', () => {
                     localStorage.setItem('selectedModel', this.modelSelect.value);
                     console.log('Model changed to:', this.modelSelect.value);
                 });
 
-                // Восстанавливаем выбранную модель
+                // Restore selected model
                 const savedModel = localStorage.getItem('selectedModel');
                 if (savedModel) {
                     this.modelSelect.value = savedModel;
@@ -1712,9 +1779,9 @@
                 // Configure marked for better rendering
                 if (typeof marked !== 'undefined') {
                     marked.setOptions({
-                        breaks: true,          // Переводы строк как <br>
+                        breaks: true,          // Line breaks as <br>
                         gfm: true,             // GitHub Flavored Markdown
-                        tables: true,          // Поддержка таблиц
+                        tables: true,          // Table support
                         sanitize: false,       // Не санитизируем (делаем вручную)
                         smartLists: true,      // Умные списки
                         smartypants: true,     // Умные кавычки

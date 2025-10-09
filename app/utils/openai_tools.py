@@ -5,13 +5,13 @@ OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_documents",
-            "description": "Search for relevant documents using semantic vector search. Returns formatted text with document information including filename, ID, size, preview, and relevance score. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information. Use this tool to find any factual information, data, or content from documents (e.g., company names, owners, directors, contracts, specifications, reports, etc.). You can optionally limit the search to specific documents by providing their IDs. The tool returns formatted results ready for display to users.",
+            "description": "Search for relevant documents using semantic vector search. Returns document metadata and extracted keywords instead of full content to avoid overwhelming the LLM. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information including filename, ID, size, document type, and extracted keywords with their values. Documents are automatically categorized by type (INVOICE, CONTRACT, COO, COA, COW, COQ, BL, FINANCIAL, LC, OTHER). Use this tool to find documents containing specific information (e.g., company names, owners, directors, contracts, specifications, reports, etc.) and get their key extracted data points. You can optionally limit the search to specific documents by providing their IDs or filter by document types. The tool returns formatted results with keywords for efficient processing.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Natural language search query. Be specific and descriptive. Examples: 'owner of Floriana Impex company', 'vessel name and specifications', 'contract details and terms', 'company registration information', 'financial data for Q4 2023'. The more specific your query, the better the results."
+                        "description": "Natural language search query. Be specific and descriptive. Examples: 'owner of Floriana Impex company', 'vessel name and specifications', 'contract details and terms', 'company registration information', 'financial data for Q4 2023', 'invoice payment terms', 'certificate of origin information'. The more specific your query, the better the results. You can also combine with document_types parameter to filter by specific document types."
                     },
                     "limit": {
                         "type": "integer",
@@ -26,6 +26,28 @@ OPENAI_TOOLS = [
                             "type": "string"
                         },
                         "description": "Optional list of specific document IDs to search within. If provided, search will be limited to these documents only. Useful for large document collections or when you want to focus on specific documents. Each ID should be a UUID string obtained from previous search results or query_documents."
+                    },
+                    "document_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["INVOICE", "CONTRACT", "COO", "COA", "COW", "COQ", "BL", "FINANCIAL", "LC", "OTHER"]
+                        },
+                        "description": (
+                            "Optional list of document types to filter by. "
+                            "Available types:\n"
+                            "INVOICE (invoices and bills),\n"
+                            "CONTRACT (contracts and agreements),\n"
+                            "COO (Certificate of Origin),\n"
+                            "COA (Certificate of Analysis),\n"
+                            "COW (Certificate of Weight),\n"
+                            "COQ (Certificate of Quality),\n"
+                            "BL (Bill of Lading),\n"
+                            "FINANCIAL (financial reports),\n"
+                            "LC (Letter of Credit),\n"
+                            "OTHER (other documents).\n"
+                            "Examples: ['INVOICE'] for only invoices, ['CONTRACT', 'INVOICE'] for contracts and invoices, ['COO', 'COA', 'COW', 'COQ'] for certificates only."
+                        )
                     }
                 },
                 "required": ["query"]
@@ -36,48 +58,13 @@ OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_document_by_id",
-            "description": "Get document information and metadata by document ID. Returns formatted document details including filename, ID, content type, status, file size, creation date, and optionally a content preview. Use this tool to get basic information about a specific document or a truncated content preview (max 2000 characters). For full document content, use get_document_full_content instead.",
+            "description": "Get document information and metadata by document ID including extracted keywords. Returns formatted document details with filename, ID, content type, document type, status, file size, creation date, and extracted keywords with their values and context. Use this tool to get comprehensive information about a specific document including all extracted key data points.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "document_id": {
                         "type": "string",
                         "description": "Document UUID obtained from search_documents results. Each search result includes an 'id' field with the document UUID."
-                    },
-                    "include_content": {
-                        "type": "boolean",
-                        "description": "If true, includes a truncated content preview (max 2000 characters). If false, returns only metadata. Default is false.",
-                        "default": False
-                    }
-                },
-                "required": ["document_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_document_full_content",
-            "description": "Get complete document content in chunks for processing large documents. This tool allows you to retrieve the full untruncated document content by breaking it into manageable chunks. Use this tool when you need to analyze the complete document content, not just excerpts. The tool provides pagination information to navigate through large documents.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "document_id": {
-                        "type": "string",
-                        "description": "Document UUID obtained from search_documents or get_document_by_id results."
-                    },
-                    "chunk_size": {
-                        "type": "integer",
-                        "description": "Size of each content chunk in characters. Larger chunks provide more context but may be harder to process. Recommended: 3000-5000 characters. Default is 3000.",
-                        "default": 3000,
-                        "minimum": 1000,
-                        "maximum": 10000
-                    },
-                    "chunk_index": {
-                        "type": "integer",
-                        "description": "Which chunk to retrieve (0-based index). Use 0 for the first chunk, 1 for the second, etc. The tool will tell you the total number of chunks available.",
-                        "default": 0,
-                        "minimum": 0
                     }
                 },
                 "required": ["document_id"]
@@ -112,6 +99,34 @@ OPENAI_TOOLS = [
                             "original_filename": {
                                 "type": "string",
                                 "description": "Filter by original filename (partial match, case-insensitive)"
+                            },
+                            "document_type": {
+                                "type": "string",
+                                "enum": [
+                                    "INVOICE",
+                                    "CONTRACT",
+                                    "COO",
+                                    "COA",
+                                    "COW",
+                                    "COQ",
+                                    "BL",
+                                    "FINANCIAL",
+                                    "LC",
+                                    "OTHER"
+                                ],
+                                "description": (
+                                    "Filter by document type. Available types:\n"
+                                    "INVOICE (invoices and bills),\n"
+                                    "CONTRACT (contracts and agreements),\n"
+                                    "COO (Certificate of Origin),\n"
+                                    "COA (Certificate of Analysis),\n"
+                                    "COW (Certificate of Weight),\n"
+                                    "COQ (Certificate of Quality),\n"
+                                    "BL (Bill of Lading),\n"
+                                    "FINANCIAL (financial reports),\n"
+                                    "LC (Letter of Credit),\n"
+                                    "OTHER (other documents)."
+                                )
                             },
                             "created_after": {
                                 "type": "string",
@@ -154,6 +169,121 @@ OPENAI_TOOLS = [
                     }
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_rules",
+            "description": (
+                "Search for business rules and policies that explain HOW TO WORK WITH DOCUMENTS. "
+                "Returns step-by-step instructions, procedures, and guidelines for document processing. "
+                "Use this tool when users ask 'How do I...', 'What is the process for...', 'What are the rules for...' "
+                "or need guidance on document workflows. Perfect for finding: "
+                "• Document verification procedures and validation rules "
+                "• Document comparison methods and parameters to check "
+                "• Document processing workflows and approval processes "
+                "• Compliance requirements and quality standards "
+                "• Security protocols and data handling procedures "
+                "• Business policies and regulatory guidelines "
+                "• Step-by-step instructions for working with different document types "
+                "This tool provides the 'HOW TO' knowledge that complements document content search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Natural language search query about HOW TO WORK WITH DOCUMENTS. Be specific and descriptive. "
+                            "Examples: 'How to verify invoice accuracy', 'What parameters to compare when checking documents', "
+                            "'Document validation procedures', 'Invoice processing workflow', 'Contract approval process', "
+                            "'Document quality standards', 'How to handle different document types', "
+                            "'Document security requirements', 'Data processing guidelines', "
+                            "'Document comparison methods', 'Approval workflow steps'. "
+                            "Focus on processes, procedures, and step-by-step instructions."
+                        )
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rules to return. Higher values provide more context but may include less relevant results. Recommended: 3-5 for focused searches, 5-10 for comprehensive searches. Default is 10.",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 20
+                    },
+                    "rule_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional list of specific rule IDs to search within. If provided, search will be limited to these rules only. Useful for large rule collections or when you want to focus on specific rules. Each ID should be a UUID string obtained from previous search results."
+                    },
+                    "category_id": {
+                        "type": "string",
+                        "description": "Optional category ID to filter rules by specific category. Use this to find rules within a particular category or domain (e.g., security rules, data handling rules, document verification, etc.)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_rule_by_id",
+            "description": "Get complete rule information by ID including full description, category details, and metadata. Returns formatted rule details with title, ID, category information, complete description, and creation/update timestamps. Use this tool to get detailed information about a specific rule when you have its ID from search results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rule_id": {
+                        "type": "string",
+                        "description": "Rule UUID obtained from search_rules results. Each search result includes an 'id' field with the rule UUID."
+                    }
+                },
+                "required": ["rule_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents_by_keywords",
+            "description": (
+                "Search for documents by specific keywords extracted from their content. "
+                "This tool allows you to find documents containing specific information like vessel names, "
+                "invoice numbers, contract details, etc. Use this when you need to find documents with "
+                "specific data points or values. Perfect for queries like 'Find documents with vessel ABC', "
+                "'Show me invoices from company XYZ', 'Find contracts with amount over 10000'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "The specific keyword to search for (e.g., 'vessel', 'invoice_number', 'contract_number', 'seller', 'buyer'). Use exact keyword names from the document type templates."
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The value to search for within that keyword field. Can be partial match. Examples: 'ABC Vessel', 'INV-2024-001', 'Company Name', '10000'."
+                    },
+                    "document_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["INVOICE", "CONTRACT", "COO", "COA", "COW", "COQ", "BL", "FINANCIAL", "LC", "OTHER"]
+                        },
+                        "description": "Optional list of document types to search within. If not provided, searches all document types."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of documents to return. Default is 10.",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 50
+                    }
+                },
+                "required": ["keyword", "value"]
             }
         }
     }

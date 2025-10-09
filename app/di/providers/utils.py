@@ -14,6 +14,7 @@ from docling.datamodel.accelerator_options import AcceleratorDevice, Accelerator
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling.chunking import HybridChunker
 from openai import AsyncOpenAI
+from app.services.keyword_extractor import KeywordExtractor
 
 class UtilsProvider(Provider):
     """
@@ -21,6 +22,10 @@ class UtilsProvider(Provider):
     Все компоненты настроены для оптимальной работы вместе.
     """
     scope = Scope.APP
+    
+    utils = provide_all(
+        KeywordExtractor,
+    )
     
     # Константы для единообразия
     EMBEDDING_MODEL = "intfloat/e5-base-v2"
@@ -137,3 +142,5 @@ class UtilsProvider(Provider):
     def provide_openai_client(self) -> AsyncOpenAI:
         """Создает клиент для OpenAI."""
         return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    
+    

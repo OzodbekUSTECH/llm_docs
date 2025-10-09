@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔐 Вход в систему</title>
+    <title>🔐 System Login</title>
     <style>
         :root {
             --primary-color: #9333ea;
@@ -348,22 +348,22 @@
         <div class="login-card">
             <div class="login-header">
                 <div class="login-icon">🤖</div>
-                <h1 class="login-title">Добро пожаловать</h1>
-                <p class="login-subtitle">Войдите в систему для продолжения</p>
+                <h1 class="login-title">Welcome</h1>
+                <p class="login-subtitle">Please log in to continue</p>
             </div>
 
             <div id="alert" class="alert"></div>
 
             <form id="loginForm">
                 <div class="form-group">
-                    <label class="form-label" for="username">Логин</label>
+                    <label class="form-label" for="username">Username</label>
                     <div class="input-wrapper">
                         <input 
                             type="text" 
                             id="username" 
                             name="username" 
                             class="form-input" 
-                            placeholder="Введите логин"
+                            placeholder="Enter username"
                             required
                             autocomplete="username"
                         >
@@ -372,14 +372,14 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" for="password">Пароль</label>
+                    <label class="form-label" for="password">Password</label>
                     <div class="input-wrapper">
                         <input 
                             type="password" 
                             id="password" 
                             name="password" 
                             class="form-input" 
-                            placeholder="Введите пароль"
+                            placeholder="Enter password"
                             required
                             autocomplete="current-password"
                         >
@@ -391,13 +391,13 @@
                 </div>
 
                 <button type="submit" class="login-button" id="loginButton">
-                    <span class="button-text">Войти</span>
+                    <span class="button-text">Log In</span>
                     <div class="button-loader"></div>
                 </button>
             </form>
 
             <div class="login-footer">
-                Защищенная система управления документами
+                Secure Document Management System
             </div>
         </div>
     </div>

@@ -2,10 +2,13 @@
 from typing import List, Dict, Any
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from qdrant_client.http.models import FieldCondition, MatchValue, MatchAny
 
+from app.dto.qdrant_filters import QdrantFilters
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.entities.documents import Document
+from app.utils.collections import Collections
 
 
 class SearchDocumentsInteractor:
@@ -25,7 +28,8 @@ class SearchDocumentsInteractor:
         query: str, 
         limit: int = 10, 
         similarity_threshold: float = 0.7,
-        document_id: str = None
+        document_id: str = None,
+        document_types: List[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Поиск документов по текстовому запросу с использованием векторного поиска в Qdrant
@@ -35,6 +39,7 @@ class SearchDocumentsInteractor:
             limit: Максимальное количество результатов
             similarity_threshold: Минимальный порог схожести (0-1)
             document_id: ID конкретного документа для поиска (опционально)
+            document_types: Список типов документов для фильтрации (опционально)
         """
         
         # 1. Генерируем embedding для запроса с префиксом "query: "
@@ -48,17 +53,43 @@ class SearchDocumentsInteractor:
         
         print(f"🔍 Поиск: '{query}' (с префиксом E5: 'query:')")
 
-        # 2. выполняем поиск в Qdrant с увеличенным лимитом для лучшей фильтрации
+        # 2. Создаем фильтры для поиска
+        filter_conditions = []
+        
+        # Фильтр по ID документа
+        if document_id:
+            filter_conditions.append(
+                FieldCondition(
+                    key="document_id",
+                    match=MatchValue(value=document_id)
+                )
+            )
+        
+        # Фильтр по типам документов
+        if document_types:
+            filter_conditions.append(
+                FieldCondition(
+                    key="document_type", 
+                    match=MatchAny(any=document_types)
+                )
+            )
+        
+        # Создаем объект фильтров если есть условия
+        filters = None
+        if filter_conditions:
+            filters = QdrantFilters(must=filter_conditions)
+        
         search_results = await self.qdrant_embeddings_repository.search_similar(
+            collection_name=Collections.DOCUMENT_EMBEDDINGS,
             query_vector=query_vector,
-            limit=limit * 3,  # Получаем больше результатов для фильтрации
-            similarity_threshold=max(0.3, similarity_threshold - 0.1),  # Снижаем порог для получения больше результатов
-            document_id=document_id
+            limit=limit,
+            similarity_threshold=similarity_threshold,
+            filters=filters
         )
 
         # 3. получаем информацию о документах для найденных чанков
         matches: List[Dict[str, Any]] = []
-        document_ids = list(set(result["document_id"] for result in search_results))
+        document_ids = list(set(result.payload.get("document_id") for result in search_results))
         
         if document_ids:
             # Получаем информацию о документах
@@ -69,9 +100,10 @@ class SearchDocumentsInteractor:
             
             # Формируем результат с дополнительной информацией
             for result in search_results:
-                doc = documents_by_id.get(result["document_id"])
+                doc_id = result.payload.get("document_id")
+                doc = documents_by_id.get(doc_id)
                 if doc:
-                    chunk_content = result["chunk_content"]
+                    chunk_content = result.payload.get("chunk_content", "")
                     
                     # Создаем умное превью чанка
                     preview = self._create_smart_preview(chunk_content, query)
@@ -83,13 +115,13 @@ class SearchDocumentsInteractor:
                     
                     matches.append(
                         {
-                            "document_id": result["document_id"],
+                            "document_id": doc_id,
                             "filename": doc.original_filename,
                             "content_type": doc.content_type,
                             "chunk": preview,
                             "full_chunk": chunk_content,
-                            "similarity": round(result["similarity"], 3),
-                            "chunk_index": result["chunk_index"],
+                            "similarity": round(result.score, 3),
+                            "chunk_index": result.payload.get("chunk_index", 0),
                             "chunk_length": len(chunk_content),
                             "created_at": doc.created_at.isoformat() if hasattr(doc, 'created_at') else None,
                             "text_matches": text_matches,  # Количество совпадающих слов
