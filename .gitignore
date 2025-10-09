@@ -4,6 +4,7 @@ venv/
 **/__pycache__/*
 *.pyc
 app/migrations/versions/*
+!app/migrations/versions/.gitkeep
 redis_data/
 postgres_data/
 logs/
