@@ -39,7 +39,7 @@ services:
     ports:
       - "${PORT}:${PORT}"
     volumes:
-      - storage_data:/code/storage
+      - ./storage_data:/code/storage
 
 volumes:
   postgres_data:
