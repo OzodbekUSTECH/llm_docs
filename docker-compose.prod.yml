@@ -39,7 +39,7 @@ services:
     ports:
       - "${PORT}:${PORT}"
     volumes:
-      - ./storage_data:/code/storage
+      - ./storage:/code/storage
       - ./app/migrations/versions:/code/app/migrations/versions
 
 volumes:
