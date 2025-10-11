@@ -8,7 +8,7 @@ from app.core.config import settings
 from ollama import AsyncClient
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions, RapidOcrOptions
 from docling.document_converter import PdfFormatOption
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
@@ -20,6 +20,17 @@ class UtilsProvider(Provider):
     """
     Provider для утилит: эмбеддинги, Qdrant, Docling, chunking.
     Все компоненты настроены для оптимальной работы вместе.
+    
+    ОСОБЕННОСТИ OCR НАСТРОЕК ДЛЯ ТАБЛИЦ:
+    - Специальная настройка для химических формул и числовых данных
+    - Распознавание формул (do_formula_enrichment) и кода (do_code_enrichment)
+    - Увеличенный масштаб изображений (2x) для лучшего качества
+    - Очень низкий порог площади (1%) для мелких символов в таблицах
+    - Отключение cell_matching для лучшего распознавания структуры таблиц
+    - Точный режим TableFormer для максимальной точности
+    - Генерация изображений таблиц для анализа
+    - Два варианта OCR: RapidOCR (по умолчанию) и Tesseract (альтернатива)
+    - Оптимизация для распознавания химических формул и специальных символов
     """
     scope = Scope.APP
     
@@ -66,44 +77,108 @@ class UtilsProvider(Provider):
     @provide
     def provide_accelerator_options(self) -> AcceleratorOptions:
         """
-        Настраивает accelerator для Docling.
+        Настраивает accelerator для Docling с оптимизацией для OCR.
         AUTO автоматически выберет лучший доступный (CUDA > MPS > CPU).
         """
         return AcceleratorOptions(
-            num_threads=8,  # Количество потоков для CPU операций
-            device=AcceleratorDevice.AUTO  # Автовыбор: CUDA > MPS > CPU
+            num_threads=12,  # Увеличиваем количество потоков для OCR
+            device=AcceleratorDevice.AUTO,  # Автовыбор: CUDA > MPS > CPU
+            # Дополнительные настройки для OCR
+            cuda_use_flash_attention2=True,
         )
     
     @provide
     def provide_pdf_pipeline_options(self) -> PdfPipelineOptions:
         """
-        Настройки pipeline для обработки PDF.
-        Включаем OCR и table structure для максимальной точности.
+        Настройки pipeline для обработки PDF с оптимизированным OCR.
+        Специально настроено для лучшего распознавания таблиц с химическими формулами.
         """
         pipeline_options = PdfPipelineOptions()
+        
+        # Основные настройки OCR и таблиц
         pipeline_options.do_ocr = True  # Включаем OCR для отсканированных PDF
         pipeline_options.do_table_structure = True  # Извлекаем структуру таблиц
-        pipeline_options.table_structure_options.do_cell_matching = True
-
-        ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True)
+        pipeline_options.do_formula_enrichment = True  # Включаем распознавание формул
+        pipeline_options.do_code_enrichment = True  # Включаем распознавание кода/символов
+        
+        # Настройки для лучшего распознавания таблиц
+        pipeline_options.table_structure_options.do_cell_matching = False  # Отключаем для лучшего распознавания структуры
+        pipeline_options.table_structure_options.mode = "accurate"  # Точный режим для таблиц
+        
+        # Настройки масштабирования для лучшего качества
+        pipeline_options.images_scale = 2.0  # Увеличиваем масштаб для лучшего распознавания
+        pipeline_options.generate_page_images = True  # Генерируем изображения страниц
+        pipeline_options.generate_table_images = True  # Генерируем изображения таблиц
+        
+        # Специальные настройки OCR для химических формул и таблиц
+        # Используем RapidOCR для лучшего распознавания таблиц
+        ocr_options = RapidOcrOptions(
+            force_full_page_ocr=True,  # Принудительное OCR всей страницы
+            # Языки для распознавания (английский + китайский для лучшего распознавания символов)
+            lang=["english", "chinese"],
+            # Очень низкий порог для распознавания мелких символов в таблицах
+            bitmap_area_threshold=0.01,  # 1% - очень низкий порог для мелких элементов
+        )
         pipeline_options.ocr_options = ocr_options
 
         return pipeline_options
     
     @provide
-    def provide_document_converter(self, pipeline_options: PdfPipelineOptions) -> DocumentConverter:
+    def provide_pdf_pipeline_options_tesseract(self) -> PdfPipelineOptions:
+        """
+        Альтернативная конфигурация с Tesseract для случаев, когда RapidOCR не работает.
+        Специально настроено для лучшего распознавания таблиц с химическими формулами.
+        """
+        pipeline_options = PdfPipelineOptions()
+        
+        # Основные настройки OCR и таблиц
+        pipeline_options.do_ocr = True  # Включаем OCR для отсканированных PDF
+        pipeline_options.do_table_structure = True  # Извлекаем структуру таблиц
+        pipeline_options.do_formula_enrichment = True  # Включаем распознавание формул
+        pipeline_options.do_code_enrichment = True  # Включаем распознавание кода/символов
+        
+        # Настройки для лучшего распознавания таблиц
+        pipeline_options.table_structure_options.do_cell_matching = False  # Отключаем для лучшего распознавания структуры
+        # pipeline_options.table_structure_options.mode = "accurate"  # Точный режим для таблиц
+        
+        # Настройки масштабирования для лучшего качества
+        pipeline_options.images_scale = 2.0  # Увеличиваем масштаб для лучшего распознавания
+        pipeline_options.generate_page_images = True  # Генерируем изображения страниц
+        pipeline_options.generate_table_images = True  # Генерируем изображения таблиц
+        
+        # Специальные настройки Tesseract OCR для химических формул и таблиц
+        ocr_options = TesseractCliOcrOptions(
+            force_full_page_ocr=True,  # Принудительное OCR всей страницы
+            # Языки для распознавания (английский + русский для лучшего распознавания формул)
+            lang=["eng", "rus"],
+            # Очень низкий порог для распознавания мелких символов в таблицах
+            bitmap_area_threshold=0.01,  # 1% - очень низкий порог для мелких элементов
+            # Путь к исполняемому файлу Tesseract
+            tesseract_cmd="tesseract",
+            # Путь к данным Tesseract (если нужно)
+            path=None
+        )
+        pipeline_options.ocr_options = ocr_options
+
+        return pipeline_options
+    
+    @provide
+    def provide_document_converter(self, pipeline_options: PdfPipelineOptions, accelerator_options: AcceleratorOptions) -> DocumentConverter:
         """
         Создает DocumentConverter с оптимизированными настройками.
-        Использует accelerator и продвинутый PDF pipeline.
+        Специально настроено для лучшего распознавания таблиц и химических формул.
         """
-        print(f"🔄 Настраиваем Docling DocumentConverter с accelerator: {pipeline_options.accelerator_options.device}")
+        print(f"🔄 Настраиваем Docling DocumentConverter с accelerator: {accelerator_options.device}")
+        
+        # Применяем accelerator к pipeline_options
+        pipeline_options.accelerator_options = accelerator_options
         
         converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(
                     pipeline_options=pipeline_options,
                 )
-            }
+            },
         )
         return converter
     
