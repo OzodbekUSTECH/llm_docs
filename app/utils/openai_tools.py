@@ -252,8 +252,9 @@ OPENAI_TOOLS = [
             "description": (
                 "Search for documents by specific keywords extracted from their content. "
                 "This tool allows you to find documents containing specific information like vessel names, "
-                "invoice numbers, contract details, etc. Use this when you need to find documents with "
-                "specific data points or values. Perfect for queries like 'Find documents with vessel ABC', "
+                "invoice numbers, contract details, etc. You can search for documents that contain a specific "
+                "keyword (with or without a value), or find documents with a keyword containing a specific value. "
+                "Perfect for queries like 'Find documents with vessel keyword', 'Find documents with vessel ABC', "
                 "'Show me invoices from company XYZ', 'Find contracts with amount over 10000'."
             ),
             "parameters": {
@@ -265,7 +266,7 @@ OPENAI_TOOLS = [
                     },
                     "value": {
                         "type": "string",
-                        "description": "The value to search for within that keyword field. Can be partial match. Examples: 'ABC Vessel', 'INV-2024-001', 'Company Name', '10000'."
+                        "description": "Optional value to search for within that keyword field. Can be partial match. If not provided, finds all documents containing this keyword. Examples: 'ABC Vessel', 'INV-2024-001', 'Company Name', '10000'."
                     },
                     "document_types": {
                         "type": "array",
@@ -283,7 +284,7 @@ OPENAI_TOOLS = [
                         "maximum": 50
                     }
                 },
-                "required": ["keyword", "value"]
+                "required": ["keyword"]
             }
         }
     }

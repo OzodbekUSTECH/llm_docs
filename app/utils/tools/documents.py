@@ -2,6 +2,7 @@
 Инструменты для работы с документами
 """
 from typing import List, Dict, Any, Optional
+from sqlalchemy import and_, func
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.entities.documents import Document
@@ -187,18 +188,8 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                 if not doc:
                     continue
                 
-                # Формируем ключевые слова для отображения
-                keywords_display = []
-                if doc.keywords:
-                    for key, value in doc.keywords.items():
-                        if isinstance(value, dict):
-                            keyword_value = value.get('value', '')
-                        else:
-                            keyword_value = str(value)
-                        if keyword_value:
-                            keywords_display.append(f"{key}: {keyword_value}")
                 
-                keywords_text = " | ".join(keywords_display) if keywords_display else "No keywords"
+                keywords_text = " | ".join(doc.keywords) if doc.keywords else "No keywords"
                 
                 # Формируем содержимое всех найденных чанков без обрезаний
                 chunks_content = []
@@ -506,7 +497,7 @@ async def query_documents(
 
 async def search_documents_by_keywords(
     keyword: str, 
-    value: str, 
+    value: Optional[str] = None, 
     document_types: Optional[List[str]] = None, 
     limit: int = 10
 ) -> List[TextContent]:
@@ -519,7 +510,7 @@ async def search_documents_by_keywords(
     
     Arguments:
         keyword (str): The specific keyword to search for (e.g., 'vessel', 'invoice_number', 'contract_number', 'seller', 'buyer')
-        value (str): The value to search for within that keyword field. Can be partial match.
+        value (Optional[str]): The value to search for within that keyword field. If not provided, finds all documents with this keyword.
         document_types (Optional[List[str]]): List of document types to search within. If not provided, searches all types.
         limit (int): Maximum number of documents to return. Default is 10.
     
@@ -531,50 +522,68 @@ async def search_documents_by_keywords(
         async with app_container() as container:
             documents_repository = await container.get(DocumentsRepository)
             
-            # Build query conditions
+            # Build query conditions for database search
             conditions = []
             
             # Add document type filter if specified
             if document_types:
                 conditions.append(Document.type.in_(document_types))
             
-            # Get all documents matching the type filter
+            # Add keyword search condition using JSON operations
+            if value:
+                # Search for documents where the keyword exists and contains the value
+                keyword_condition = and_(
+                    func.jsonb_exists(Document.keywords, keyword),
+                    func.jsonb_path_exists(
+                        Document.keywords,
+                        f'$."{keyword}" ? (@ like_regex "{value}" flag "i")'
+                    )
+                )
+            else:
+                # Search for documents where the keyword exists (any value)
+                keyword_condition = func.jsonb_exists(Document.keywords, keyword)
+            
+            conditions.append(keyword_condition)
+            
+            # Get documents matching the conditions with limit
             from app.dto.pagination import InfiniteScrollRequest
-            request = InfiniteScrollRequest(limit=limit * 2, offset=0)  # Get more documents to filter by keywords
+            request = InfiniteScrollRequest(limit=limit, offset=0)
             documents = await documents_repository.get_all(
                 request_query=request,
                 where=conditions,
             )
             
-            # Filter documents by keyword value
+            # Prepare matching documents with keyword values
             matching_documents = []
             for doc in documents:
-                if not doc.keywords:
+                if not doc.keywords or keyword not in doc.keywords:
                     continue
-                    
-                # Check if the keyword exists and contains the value
-                if keyword in doc.keywords:
-                    keyword_data = doc.keywords[keyword]
-                    if isinstance(keyword_data, dict):
-                        keyword_value = keyword_data.get('value', '')
-                    else:
-                        keyword_value = str(keyword_data)
-                    
-                    # Check if the value matches (case-insensitive partial match)
-                    if value.lower() in keyword_value.lower():
-                        matching_documents.append((doc, keyword_value))
-            
-            # Limit results
-            matching_documents = matching_documents[:limit]
+                
+                keyword_data = doc.keywords[keyword]
+                if isinstance(keyword_data, dict):
+                    keyword_value = keyword_data.get('value', '')
+                else:
+                    keyword_value = str(keyword_data)
+                
+                matching_documents.append((doc, keyword_value))
             
             if not matching_documents:
-                return [TextContent(
-                    type="text",
-                    text=f"🔍 No documents found with keyword '{keyword}' containing value '{value}'"
-                )]
+                if value:
+                    return [TextContent(
+                        type="text",
+                        text=f"🔍 No documents found with keyword '{keyword}' containing value '{value}'"
+                    )]
+                else:
+                    return [TextContent(
+                        type="text",
+                        text=f"🔍 No documents found with keyword '{keyword}'"
+                    )]
             
             # Format results
-            response = f"🔍 **Found {len(matching_documents)} documents with keyword '{keyword}' containing '{value}'**\n\n"
+            if value:
+                response = f"🔍 **Found {len(matching_documents)} documents with keyword '{keyword}' containing '{value}'**\n\n"
+            else:
+                response = f"🔍 **Found {len(matching_documents)} documents with keyword '{keyword}'**\n\n"
             
             for i, (doc, keyword_value) in enumerate(matching_documents, 1):
                 # Format creation date
@@ -600,12 +609,6 @@ async def search_documents_by_keywords(
                 response += f"   📋 Type: {doc.type.value}\n"
                 response += f"   🔑 **{keyword}**: {keyword_value}\n"
                 response += f"   📅 Created: {created_at}\n"
-                
-                # Add context if available
-                if isinstance(doc.keywords.get(keyword), dict):
-                    context = doc.keywords[keyword].get('context')
-                    if context:
-                        response += f"   📝 Context: {context[:200]}{'...' if len(context) > 200 else ''}\n"
                 
                 response += "\n"
             
