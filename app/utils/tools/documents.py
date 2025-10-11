@@ -14,6 +14,19 @@ from qdrant_client.http.models import FieldCondition, MatchAny
 from app.dto.qdrant_filters import QdrantFilters
 from app.utils.enums import DocumentType
 
+def format_datetime(date_obj, include_time=True):
+    """Format datetime object to readable string"""
+    if not date_obj:
+        return "Unknown"
+    
+    try:
+        if include_time:
+            return date_obj.strftime("%B %d, %Y at %H:%M")
+        else:
+            return date_obj.strftime("%B %d, %Y")
+    except Exception:
+        return "Invalid Date"
+
 async def search_documents(query: str, limit: int = 10, document_ids: Optional[List[str]] = None, document_types: Optional[List[str]] = None) -> List[TextContent]:
     """
     Search for relevant documents using semantic vector search. Returns document metadata and keywords.
@@ -117,7 +130,7 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                 collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 query_vector=query_vector,
                 limit=limit,
-                similarity_threshold=0.7,
+                similarity_threshold=0.8,  # Только релевантные результаты
                 filters=filters
             )
             
@@ -139,14 +152,27 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                         "filename": result.payload.get("filename", ""),
                         "content_type": result.payload.get("content_type", ""),
                         "document_type": result.payload.get("document_type", "OTHER"),
+                        "chunks": []  # Добавляем список чанков
                     }
                 
-                # Обновляем максимальную схожесть
+                # Обновляем максимальную схожесть и добавляем чанк
                 if result.score > documents_scores[doc_id]["max_similarity"]:
                     documents_scores[doc_id]["max_similarity"] = result.score
+                
+                # Добавляем чанк с его содержимым и релевантностью
+                documents_scores[doc_id]["chunks"].append({
+                    "content": result.payload.get("chunk_content", ""),
+                    "score": result.score,
+                    "chunk_index": result.payload.get("chunk_index", 0)
+                })
+            
+            # Сортируем чанки по релевантности для каждого документа
+            for doc_id, doc_data in documents_scores.items():
+                doc_data["chunks"].sort(key=lambda x: x["score"], reverse=True)
             
             # Получаем документы из БД одним запросом
             doc_ids = list(documents_scores.keys())
+            
             documents = await documents_repository.get_all(
                 where=[Document.id.in_(doc_ids)]
             )
@@ -172,9 +198,12 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                         if keyword_value:
                             keywords_display.append(f"{key}: {keyword_value}")
                 
-                keywords_text = " | ".join(keywords_display[:5])  # Показываем только первые 5 ключевых слов
-                if len(keywords_display) > 5:
-                    keywords_text += f" ... and {len(keywords_display) - 5} more"
+                keywords_text = " | ".join(keywords_display) if keywords_display else "No keywords"
+                
+                # Формируем содержимое всех найденных чанков без обрезаний
+                chunks_content = []
+                for i, chunk in enumerate(doc_data["chunks"]):
+                    chunks_content.append(f"Chunk {i+1} (score: {chunk['score']:.3f}): {chunk['content']}")
                 
                 results.append({
                     "filename": doc.original_filename,
@@ -184,6 +213,8 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                     "relevance_score": round(doc_data["max_similarity"], 3),
                     "content_type": doc.content_type,
                     "document_type": doc.type.value,
+                    "chunks": chunks_content,
+                    "total_chunks": len(doc_data["chunks"])
                 })
             
             # Сортируем по релевантности
@@ -207,7 +238,15 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                 response += f"   📋 Type: {doc['document_type']} | 📄 Format: {doc['content_type']}\n"
                 if doc['keywords']:
                     response += f"   🔑 Keywords: {doc['keywords']}\n"
-                response += f"   ⭐ Relevance: {doc['relevance_score']:.3f}\n\n"
+                response += f"   ⭐ Relevance: {doc['relevance_score']:.3f}\n"
+                
+                # Добавляем все найденные чанки
+                if doc['chunks']:
+                    response += f"   📝 Found {doc['total_chunks']} relevant chunks:\n"
+                    for chunk in doc['chunks']:
+                        response += f"      • {chunk}\n"
+                
+                response += "\n"
             
             return [TextContent(type="text", text=response)]
             
@@ -500,9 +539,11 @@ async def search_documents_by_keywords(
                 conditions.append(Document.type.in_(document_types))
             
             # Get all documents matching the type filter
+            from app.dto.pagination import InfiniteScrollRequest
+            request = InfiniteScrollRequest(limit=limit * 2, offset=0)  # Get more documents to filter by keywords
             documents = await documents_repository.get_all(
+                request_query=request,
                 where=conditions,
-                limit=limit
             )
             
             # Filter documents by keyword value
@@ -537,7 +578,7 @@ async def search_documents_by_keywords(
             
             for i, (doc, keyword_value) in enumerate(matching_documents, 1):
                 # Format creation date
-                created_at = doc.created_at.strftime("%Y-%m-%d %H:%M") if doc.created_at else "Unknown"
+                created_at = format_datetime(doc.created_at, include_time=True)
                 
                 # Get document type icon and name
                 type_icons = {
@@ -548,6 +589,7 @@ async def search_documents_by_keywords(
                     DocumentType.COW: "⚖️",
                     DocumentType.COQ: "🏆",
                     DocumentType.BL: "🚢",
+                    DocumentType.LC: "💳",
                     DocumentType.FINANCIAL: "💰",
                     DocumentType.OTHER: "📁"
                 }
