@@ -57,13 +57,19 @@ class ContractSectionExtractor:
             "robustly (case-insensitive, tolerate numbering and punctuation). Keep the original order. "
             "Include a section only if meaningful content exists. For 'ISPS' and 'CONTACTS' split into the two sub-sections as listed. "
             "If there are tables relevant to any section, include their markdown under that section content. "
+            "Critically: for EACH expected heading, COLLECT ALL content that belongs to it from the ENTIRE contract. "
+            "This includes multiple occurrences throughout the document (e.g., repeated PRICE clauses); MERGE them in original order. "
+            "Do NOT truncate or summarize; include full paragraphs, bullet points, sub-clauses, and tables. "
             "If any important information does not clearly belong to the predefined sections, place it under 'ADDITIONAL INFORMATION'."
         )
 
         user = (
             f"Expected headings in order:\n{ordered_titles}\n\n"
+            "For each heading, extract ALL related content from the whole contract. If a heading appears multiple times or content is scattered, MERGE all parts keeping the original text order yourself. "
+            "Include everything until the next heading begins each time (paragraphs, lists, sub-clauses, tables as markdown). "
             "Return JSON with an array 'sections', each item has 'title' and 'content'. "
-            "Title must be exactly from the expected list above. Content is plain text/markdown gathered from the contract, not invented.\n\n"
+            "Title must be exactly from the expected list above. Content is plain text/markdown gathered from the contract, not invented. Do not summarize or shorten. "
+            "Return AT MOST ONE item per title. If no content for a title, omit that title.\n\n"
             f"CONTRACT TEXT:\n{content}"
         )
 
@@ -77,8 +83,8 @@ class ContractSectionExtractor:
         )
 
         output: ContractSectionsOutput = response.output_parsed
-        # Convert to list of dicts
-        items = []
+        # Convert to list of dicts; GPT must already aggregate per title
+        items: List[dict] = []
         for section in output.sections:
             title = section.title.strip()
             content_text = section.content.strip()
