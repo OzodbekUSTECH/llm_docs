@@ -5,17 +5,31 @@ OPENAI_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_documents",
-            "description": "Search for relevant documents using semantic vector search. Returns document metadata and extracted keywords instead of full content to avoid overwhelming the LLM. This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information including filename, ID, size, document type, and extracted keywords with their values. Documents are automatically categorized by type (INVOICE, CONTRACT, COO, COA, COW, COQ, BL, FINANCIAL, LC, OTHER). Use this tool to find documents containing specific information (e.g., company names, owners, directors, contracts, specifications, reports, etc.) and get their key extracted data points. You can optionally limit the search to specific documents by providing their IDs or filter by document types. The tool returns formatted results with keywords for efficient processing.",
+            "description": (
+                "Search for relevant documents using semantic vector search. "
+                "Always pass the user's full query (not just individual keywords) for the best results – do not extract or break down to only certain words. "
+                "This tool performs intelligent semantic search across all uploaded documents and returns the most relevant information including filename, ID, size, document type, and extracted keywords with their values. "
+                "Documents are automatically categorized by type (INVOICE, CONTRACT, COO, COA, COW, COQ, BL, FINANCIAL, LC, OTHER). "
+                "Use this tool to find documents containing specific information (e.g., company names, owners, directors, contracts, specifications, reports, etc.) and get their key extracted data points. "
+                "You can optionally limit the search to specific documents by providing their IDs or filter by document types. "
+                "The tool returns formatted results with keywords for efficient processing."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Natural language search query. Be specific and descriptive. Examples: 'owner of Floriana Impex company', 'vessel name and specifications', 'contract details and terms', 'company registration information', 'financial data for Q4 2023', 'invoice payment terms', 'certificate of origin information'. The more specific your query, the better the results. You can also combine with document_types parameter to filter by specific document types."
+                        "description": (
+                            "A natural language search query. "
+                            "Always provide the full query exactly as entered by the user, not individual keywords or a processed/shortened form. "
+                            "The more specific and descriptive the user's query is, the better the results. "
+                            "You can also combine with document_types parameter to filter by specific document types. "
+                            "Additionally, you can use the 'document_ids' parameter to filter by specific documents and find the most relevant chunk within a particular document."
+                        )
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of documents to return. Higher values provide more context but may include less relevant results. Recommended: 3-5 for focused searches, 5-10 for comprehensive searches. Default is 10 for maximum information coverage.",
+                        "description": "Maximum number of documents to return. Higher values provide more context but may include less relevant results",
                         "default": 10,
                         "minimum": 1,
                         "maximum": 20
@@ -51,23 +65,6 @@ OPENAI_TOOLS = [
                     }
                 },
                 "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_document_by_id",
-            "description": "Get document information and metadata by document ID including extracted keywords. Returns formatted document details with filename, ID, content type, document type, status, file size, creation date, and extracted keywords with their values and context. Use this tool to get comprehensive information about a specific document including all extracted key data points.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "document_id": {
-                        "type": "string",
-                        "description": "Document UUID obtained from search_documents results. Each search result includes an 'id' field with the document UUID."
-                    }
-                },
-                "required": ["document_id"]
             }
         }
     },
@@ -245,47 +242,4 @@ OPENAI_TOOLS = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_documents_by_keywords",
-            "description": (
-                "Search for documents by specific keywords extracted from their content. "
-                "This tool allows you to find documents containing specific information like vessel names, "
-                "invoice numbers, contract details, etc. You can search for documents that contain a specific "
-                "keyword (with or without a value), or find documents with a keyword containing a specific value. "
-                "Perfect for queries like 'Find documents with vessel keyword', 'Find documents with vessel ABC', "
-                "'Show me invoices from company XYZ', 'Find contracts with amount over 10000'."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {
-                        "type": "string",
-                        "description": "The specific keyword to search for (e.g., 'vessel', 'invoice_number', 'contract_number', 'seller', 'buyer'). Use exact keyword names from the document type templates."
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": "Optional value to search for within that keyword field. Can be partial match. If not provided, finds all documents containing this keyword. Examples: 'ABC Vessel', 'INV-2024-001', 'Company Name', '10000'."
-                    },
-                    "document_types": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["INVOICE", "CONTRACT", "COO", "COA", "COW", "COQ", "BL", "FINANCIAL", "LC", "OTHER"]
-                        },
-                        "description": "Optional list of document types to search within. If not provided, searches all document types."
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of documents to return. Default is 10.",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 50
-                    }
-                },
-                "required": ["keyword"]
-            }
-        }
-    }
 ]

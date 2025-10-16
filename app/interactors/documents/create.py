@@ -18,6 +18,7 @@ from app.utils.collections import Collections
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
 from app.services.keyword_extractor import KeywordExtractor
+from app.services.contract_section_extractor import ContractSectionExtractor
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,8 @@ class CreateDocumentInteractor:
         qdrant_client: AsyncQdrantClient,
         document_converter: DocumentConverter,
         docling_chunker: HybridChunker,
-        keyword_extractor: KeywordExtractor
+        keyword_extractor: KeywordExtractor,
+        contract_section_extractor: ContractSectionExtractor,
     ):
         self.uow = uow
         self.documents_repository = documents_repository
@@ -44,6 +46,7 @@ class CreateDocumentInteractor:
         self.document_converter = document_converter
         self.docling_chunker = docling_chunker
         self.keyword_extractor = keyword_extractor
+        self.contract_section_extractor = contract_section_extractor
         
     def _detect_document_type(self, filename: str, content: str) -> DocumentType:
         """
@@ -335,7 +338,16 @@ class CreateDocumentInteractor:
             )
             await self.documents_repository.create(document)
             
-            chunks = self._chunk_with_docling(dl_doc)
+            # Если это CONTRACT, используем GPT для секций; иначе Docling чанки
+            if detected_type == DocumentType.CONTRACT:
+                sections = await self.contract_section_extractor.extract(content)
+                # Сохраняем секции в метаданные документа для дальнейшего использования/отображения
+                document.doc_metadata = {"contract_sections": sections}
+
+                # Готовим чанки как title + content, порядок важен (chunk_index)
+                chunks = [f"{item['title']}\n\n{item['content']}" for item in sections]
+            else:
+                chunks = self._chunk_with_docling(dl_doc)
             
             embeddings = self.sentence_transformer.encode(
                 chunks,

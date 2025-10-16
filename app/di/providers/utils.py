@@ -15,6 +15,7 @@ from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTok
 from docling.chunking import HybridChunker
 from openai import AsyncOpenAI
 from app.services.keyword_extractor import KeywordExtractor
+from app.services.contract_section_extractor import ContractSectionExtractor
 
 class UtilsProvider(Provider):
     """
@@ -36,6 +37,7 @@ class UtilsProvider(Provider):
     
     utils = provide_all(
         KeywordExtractor,
+        ContractSectionExtractor,
     )
     
     # Константы для единообразия

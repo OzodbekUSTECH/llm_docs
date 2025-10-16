@@ -131,7 +131,7 @@ async def search_documents(query: str, limit: int = 10, document_ids: Optional[L
                 collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 query_vector=query_vector,
                 limit=limit,
-                similarity_threshold=0.8,  # Только релевантные результаты
+                similarity_threshold=0.7,  # Только релевантные результаты
                 filters=filters
             )
             
