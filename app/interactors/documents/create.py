@@ -11,6 +11,7 @@ from app.entities.documents import Document
 from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.repositories.uow import UnitOfWork
+from app.services.extract_text_from_file import DocumentParserOpenAI
 from app.utils.enums import DocumentStatus, DocumentType
 from app.exceptions.app_error import AppError
 from qdrant_client import AsyncQdrantClient
@@ -35,6 +36,7 @@ class CreateDocumentInteractor:
         docling_chunker: HybridChunker,
         keyword_extractor: KeywordExtractor,
         contract_section_extractor: ContractSectionExtractor,
+        document_parser: DocumentParserOpenAI
     ):
         self.uow = uow
         self.documents_repository = documents_repository
@@ -47,6 +49,7 @@ class CreateDocumentInteractor:
         self.docling_chunker = docling_chunker
         self.keyword_extractor = keyword_extractor
         self.contract_section_extractor = contract_section_extractor
+        self.document_parser = document_parser
         
     def _detect_document_type(self, filename: str, content: str) -> DocumentType:
         """
@@ -305,23 +308,25 @@ class CreateDocumentInteractor:
             f.write(file_bytes)
             
         try:
-            content, tables, dl_doc = await self._extract_text_and_tables(file_path)
-            print(f"✅ Docling документ извлечен: {content}")
+            # content, tables, dl_doc = await self._extract_text_and_tables(file_path)
+            # print(f"✅ Docling документ извлечен: {content}")
             
-            if not content:
-                raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
+            # if not content:
+            #     raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
             
-            # Определяем тип документа
-            detected_type = self._detect_document_type(file.filename, content)
+            # # Определяем тип документа
             
-            # Извлекаем ключевые слова с помощью OpenAI
-            logger.info(f"Extracting keywords for document type: {detected_type.value}")
-            try:
-                keywords = await self.keyword_extractor.extract_keywords(content, detected_type)
-                logger.info(f"Extracted {len(keywords)} keywords")
-            except Exception as e:
-                logger.error(f"Failed to extract keywords: {e}")
-                keywords = {}  # Продолжаем без ключевых слов
+            # keywords = {}
+            # # Извлекаем ключевые слова с помощью OpenAI
+            # logger.info(f"Extracting keywords for document type: {detected_type.value}")
+            # try:
+            #     keywords = await self.keyword_extractor.extract_keywords(content, detected_type)
+            #     logger.info(f"Extracted {len(keywords)} keywords")
+            # except Exception as e:
+            #     logger.error(f"Failed to extract keywords: {e}")
+            #     keywords = {}  # Продолжаем без ключевых слов
+            response, full_content = await self.document_parser.parse_contract(file_path)
+            detected_type = self._detect_document_type(file.filename, full_content)
             
             document = Document(
                 id=id,
@@ -331,30 +336,31 @@ class CreateDocumentInteractor:
                 content_type=file.content_type or "application/octet-stream",
                 file_hash=file_hash,
                 status=DocumentStatus.COMPLETED,
-                content=content,
-                tables=tables,
+                content=full_content,
                 type=detected_type,  # Добавляем определенный тип
-                keywords=keywords,  # Добавляем извлеченные ключевые слова
+                keywords={},  # Добавляем извлеченные ключевые слова
             )
             await self.documents_repository.create(document)
             
-            # Если это CONTRACT/INVOICE, используем GPT; иначе Docling чанки
-            if detected_type == DocumentType.CONTRACT:
-                sections = await self.contract_section_extractor.extract(content)
-                # Сохраняем секции в метаданные документа для дальнейшего использования/отображения
-                document.doc_metadata = {"contract_sections": sections}
+            # # Если это CONTRACT/INVOICE, используем GPT; иначе Docling чанки
+            # if detected_type == DocumentType.CONTRACT:
+            #     sections = await self.contract_section_extractor.extract(content)
+            #     # Сохраняем секции в метаданные документа для дальнейшего использования/отображения
+            #     document.doc_metadata = {"contract_sections": sections}
 
-                # Готовим чанки как title + content, порядок важен (chunk_index)
-                chunks = [f"{item['title']}\n\n{item['content']}" for item in sections]
-            elif detected_type == DocumentType.INVOICE:
-                fields = await self.contract_section_extractor.extract_invoice_fields(content)
-                # Сохраняем поля в метаданные
-                document.doc_metadata = {"invoice_fields": fields}
-                # Чанки в формате title + value для векторного поиска
-                chunks = [f"{item['title']}\n\n{item['value']}" for item in fields]
-            else:
-                chunks = self._chunk_with_docling(dl_doc)
+            #     # Готовим чанки как title + content, порядок важен (chunk_index)
+            #     chunks = [f"{item['title']}\n\n{item['content']}" for item in sections]
+            # elif detected_type == DocumentType.INVOICE:
+            #     fields = await self.contract_section_extractor.extract_invoice_fields(content)
+            #     # Сохраняем поля в метаданные
+            #     document.doc_metadata = {"invoice_fields": fields}
+            #     # Чанки в формате title + value для векторного поиска
+            #     chunks = [f"{item['title']}\n\n{item['value']}" for item in fields]
+            # else:
+            #     chunks = self._chunk_with_docling(dl_doc)
             
+            chunks = [f"{item.title}\n\n{item.content}" for item in response.sections]
+
             embeddings = self.sentence_transformer.encode(
                 chunks,
                 convert_to_numpy=True,
