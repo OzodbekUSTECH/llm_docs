@@ -338,7 +338,7 @@ class CreateDocumentInteractor:
             )
             await self.documents_repository.create(document)
             
-            # Если это CONTRACT, используем GPT для секций; иначе Docling чанки
+            # Если это CONTRACT/INVOICE, используем GPT; иначе Docling чанки
             if detected_type == DocumentType.CONTRACT:
                 sections = await self.contract_section_extractor.extract(content)
                 # Сохраняем секции в метаданные документа для дальнейшего использования/отображения
@@ -346,6 +346,12 @@ class CreateDocumentInteractor:
 
                 # Готовим чанки как title + content, порядок важен (chunk_index)
                 chunks = [f"{item['title']}\n\n{item['content']}" for item in sections]
+            elif detected_type == DocumentType.INVOICE:
+                fields = await self.contract_section_extractor.extract_invoice_fields(content)
+                # Сохраняем поля в метаданные
+                document.doc_metadata = {"invoice_fields": fields}
+                # Чанки в формате title + value для векторного поиска
+                chunks = [f"{item['title']}\n\n{item['value']}" for item in fields]
             else:
                 chunks = self._chunk_with_docling(dl_doc)
             

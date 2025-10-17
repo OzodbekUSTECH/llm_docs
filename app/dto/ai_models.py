@@ -20,3 +20,14 @@ class ContractSection(BaseModel):
 class ContractSectionsOutput(BaseModel):
     """Structured output from LLM for contract sections."""
     sections: List[ContractSection] = Field(default_factory=list)
+
+
+class InvoiceField(BaseModel):
+    """Single extracted invoice field as title/value pair."""
+    title: str = Field(description="Human-readable field title, e.g., 'INVOICE NO', 'DATE', 'SELLER' ")
+    value: str = Field(description="Verbatim or minimally normalized value text; may include markdown for tables")
+
+
+class InvoiceFieldsOutput(BaseModel):
+    """Structured output from LLM for invoice key-value fields."""
+    fields: List[InvoiceField] = Field(default_factory=list)
