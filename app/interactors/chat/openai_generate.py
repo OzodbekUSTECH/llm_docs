@@ -163,8 +163,8 @@ class OpenAIGenerateInteractor:
                         self.openai_client.chat.completions.create(
                             model=model,
                             messages=chat_history,
-                            temperature=0.7,
-                            max_tokens=4000,  # Увеличено для более полных ответов
+                            temperature=0,
+                            # max_tokens=4000,  # Увеличено для более полных ответов
                             tools=OPENAI_TOOLS,
                             tool_choice="auto"
                         ),
@@ -267,8 +267,8 @@ class OpenAIGenerateInteractor:
                     self.openai_client.chat.completions.create(
                         model=model,
                         messages=chat_history,
-                        temperature=0.7,
-                        max_tokens=4000
+                        temperature=0,
+                        # max_tokens=4000
                     ),
                     timeout=60.0
                 )
@@ -332,8 +332,8 @@ class OpenAIGenerateInteractor:
             response = await self.openai_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=20
+                # temperature=0,
+                # max_tokens=20
             )
             
             title = response.choices[0].message.content.strip().strip('"').strip("'")
@@ -439,7 +439,7 @@ class OpenAIGenerateInteractor:
                                 model=model,
                                 messages=chat_history,
                                 temperature=0,
-                                max_tokens=4000,  # Увеличено для более полных ответов
+                                # max_tokens=4000,  # Увеличено для более полных ответов
                                 tools=OPENAI_TOOLS,
                                 tool_choice="auto",
                                 stream=True
@@ -661,7 +661,7 @@ class OpenAIGenerateInteractor:
                         model=model,
                         messages=chat_history,
                         temperature=0,
-                        max_tokens=4000
+                        # max_tokens=4000
                     ),
                     timeout=90.0  # Увеличено с 60 до 90 секунд
                 )
