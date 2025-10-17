@@ -6,6 +6,7 @@ from app.interactors.documents.search import SearchDocumentsInteractor
 from app.interactors.chat.generate import GenerateAnswerInteractor
 from app.interactors.chat.openai_generate import OpenAIGenerateInteractor
 from app.interactors.documents.get import GetAllDocumentsInteractor, GetDocumentByIdInteractor
+from app.interactors.documents.get_chunks import GetDocumentChunksInteractor
 
 
 class DocumentsInteractorProvider(Provider):
@@ -19,5 +20,6 @@ class DocumentsInteractorProvider(Provider):
         GenerateAnswerInteractor,
         OpenAIGenerateInteractor,
         GetAllDocumentsInteractor,
-        GetDocumentByIdInteractor
+        GetDocumentByIdInteractor,
+        GetDocumentChunksInteractor,
     )

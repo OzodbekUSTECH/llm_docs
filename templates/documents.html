@@ -1573,6 +1573,9 @@
                                 <button class="action-button primary" onclick="documentsApp.viewDocument('${docId}')">
                                     📄 View Details
                                 </button>
+                                <button class="action-button" onclick="documentsApp.viewDocumentChunks('${docId}')">
+                                    🔎 View Chunks
+                                </button>
                                 <button class="action-button" onclick="documentsApp.downloadDocument('${docId}')">
                                     💾 Download
                                 </button>
@@ -1727,6 +1730,49 @@
                     this.modalContent.innerHTML = content;
                 } catch (error) {
                     console.error('View error:', error);
+                    this.modalContent.innerHTML = `<div class="error">${error.message}</div>`;
+                }
+            }
+
+            async viewDocumentChunks(id) {
+                this.modalTitle.textContent = 'Document Chunks';
+                this.modalContent.innerHTML = '<div class="loading"><div class="loading-spinner"></div><div>Loading chunks...</div></div>';
+                this.modal.classList.add('show');
+
+                try {
+                    const response = await fetch(`/documents/${id}/chunks`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const chunks = await response.json();
+                    if (!Array.isArray(chunks) || chunks.length === 0) {
+                        this.modalContent.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">📄</div>
+                                <h3>No Chunks Found</h3>
+                                <p>This document has no stored chunks</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    const html = `
+                        <div class="content-section">
+                            <div class="section-title">🔎 Document Chunks (${chunks.length})</div>
+                            ${chunks.map(c => `
+                                <div class="document-card" style="margin-bottom: 12px;">
+                                    <div class="document-header">
+                                        <div class="document-title">Chunk #${c.chunk_index}</div>
+                                    </div>
+                                    <div class="markdown-content">${this.renderMarkdown(c.content)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    this.modalContent.innerHTML = html;
+                } catch (error) {
+                    console.error('View chunks error:', error);
                     this.modalContent.innerHTML = `<div class="error">${error.message}</div>`;
                 }
             }

@@ -185,4 +185,59 @@ class QdrantEmbeddingsRepository:
             collection_name=collection_name,
             field_name="document_id"
         )
+
+    async def get_chunks_by_document(
+        self,
+        collection_name: str,
+        document_id: str,
+        with_vectors: bool = False,
+        limit_per_page: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Возвращает все чанки документа из Qdrant, отсортированные по chunk_index ASC.
+
+        Args:
+            collection_name: коллекция Qdrant
+            document_id: ID документа
+            with_vectors: возвращать ли векторы (по умолчанию нет)
+            limit_per_page: размер страницы для scroll
+
+        Returns:
+            Список словарей с полями: chunk_index, chunk_content и прочий payload
+        """
+
+        # Подготавливаем фильтр
+        q_filter = Filter(must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))])
+
+        # Scroll постранично
+        next_page = None
+        all_points: List[models.Record] = []
+        while True:
+            scroll_result = await self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=q_filter,
+                with_payload=True,
+                with_vectors=with_vectors,
+                limit=limit_per_page,
+                offset=next_page,
+            )
+            points, next_page = scroll_result
+            if points:
+                all_points.extend(points)
+            if next_page is None:
+                break
+
+        # Преобразуем в удобный формат и сортируем по chunk_index
+        chunks: List[Dict[str, Any]] = []
+        for p in all_points:
+            payload = p.payload or {}
+            chunks.append({
+                "point_id": p.id,
+                "chunk_index": payload.get("chunk_index", 0),
+                "content": payload.get("chunk_content", ""),
+                "payload": payload,
+                "vector": getattr(p, "vector", None) if with_vectors else None,
+            })
+
+        chunks.sort(key=lambda x: x["chunk_index"])
+        return chunks
  

@@ -9,6 +9,7 @@ from app.interactors.documents.create import CreateDocumentInteractor
 from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
 from app.interactors.documents.get import GetAllDocumentsInteractor, GetDocumentByIdInteractor
+from app.interactors.documents.get_chunks import GetDocumentChunksInteractor
 from app.dto.documents import GetDocumentsParams, DocumentListResponse, DocumentResponse
 from app.dto.pagination import PaginatedResponse
 
@@ -135,4 +136,15 @@ async def get_document_file_url(
         "filename": document.original_filename,
         "content_type": document.content_type
     }
+    
+
+@router.get("/{id}/chunks", response_model=List[Dict[str, Any]])
+async def get_document_chunks(
+    get_document_chunks_interactor: FromDishka[GetDocumentChunksInteractor],
+    id: UUID,
+):
+    """
+    Вернуть все чанки документа по порядку chunk_index ASC
+    """
+    return await get_document_chunks_interactor.execute(str(id))
     
