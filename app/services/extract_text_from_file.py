@@ -38,7 +38,7 @@ class DocumentParserOpenAI:
         )
 
         response = await self.openai_client.responses.parse(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             input=[
                 {"role": "system", "content": [
                     {"type": "input_text", "text": system_prompt},
