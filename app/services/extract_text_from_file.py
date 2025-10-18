@@ -38,7 +38,7 @@ class DocumentParserOpenAI:
         )
 
         response = await self.openai_client.responses.parse(
-            model="gpt-4o",
+            model="gpt-5-mini",
             input=[
                 {"role": "system", "content": [
                     {"type": "input_text", "text": system_prompt},
@@ -49,7 +49,7 @@ class DocumentParserOpenAI:
                 ]},
             ],
             text_format=ContractSectionsOutput,
-            temperature=0,
+            # temperature=0,
         )
 
         output: ContractSectionsOutput = response.output_parsed
