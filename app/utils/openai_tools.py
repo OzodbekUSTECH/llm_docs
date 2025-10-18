@@ -169,4 +169,54 @@ OPENAI_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_rules",
+            "description": (
+                "Search for relevant rules and regulations using semantic vector search. "
+                "This tool is BEST USED BEFORE search_documents for any task involving comparison, counting, analysis, or finding specific documents. "
+                "It helps identify which rules apply to specific situations, what criteria to look for in documents, and how to better structure document searches. "
+                "Use this tool to understand regulatory requirements, compliance rules, business processes, or any guidelines that should be applied when analyzing documents. "
+                "The tool performs intelligent semantic search across all rules and returns the most relevant information including rule title, ID, category, content, and relevance score. "
+                "You can optionally limit the search to specific rules by providing their IDs or filter by rule categories. "
+                "This tool is particularly useful for understanding context before searching documents, as it provides the framework and criteria for what to look for."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "A natural language search query describing the rules or regulations you're looking for. "
+                            "Be specific about the type of rules, compliance requirements, or business processes you need. "
+                            "Examples: 'invoicing requirements', 'contract terms', 'quality standards', 'shipping regulations', etc."
+                        )
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of rules to return. Higher values provide more context but may include less relevant results",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 20
+                    },
+                    "rule_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional list of specific rule IDs to search within. If provided, search will be limited to these rules only. Useful when you want to focus on specific rules or check compliance against particular regulations."
+                    },
+                    "category_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Optional list of rule category IDs to filter by. If provided, search will be limited to rules within these categories only. Useful for focusing on specific types of rules (e.g., financial, operational, compliance)."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]

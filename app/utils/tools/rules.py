@@ -12,41 +12,10 @@ from app.utils.collections import Collections
 from app.dto.ai_models import TextContent
 from app.dto.qdrant_filters import QdrantFilters
 
-async def search_rules(query: str, limit: int = 10, rule_ids: Optional[List[str]] = None, category_id: Optional[str] = None) -> List[TextContent]:
-    """
-    Search for relevant rules using semantic vector search. Returns formatted text with rule information.
-    
-    Use this tool to:
-    - Find rules matching a query (e.g., security requirements, data handling policies, user permissions, etc.)
-    - Get relevant rule details with descriptions
-    - Search within specific rules by providing rule IDs
-    - Filter by category using category_id
-    - Obtain rule IDs for detailed retrieval if needed
-
-    Arguments:
-        query (str): Natural language search query. Be specific and descriptive. Examples:
-            - "password requirements and authentication rules"
-            - "data retention and privacy policies"
-            - "user access control and permissions"
-            - "security compliance and audit requirements"
-        limit (int, optional): Maximum number of rules to return. Default is 10.
-        rule_ids (List[str], optional): List of specific rule IDs to search within. 
-            If provided, search will be limited to these rules only.
-        category_id (str, optional): Filter rules by specific category ID.
-
-    Returns:
-        List[TextContent]: Formatted text containing:
-            - 📋 Found X rules matching 'query'
-            - For each rule:
-                - **N. rule_title** - Rule name
-                - 🆔 ID: rule_id | 📂 Category: category_name
-                - 📝 Description: rule description
-                - ⭐ Relevance: score (0.0-1.0)
-    
-    If no results found, returns "No rules found matching query: 'query'".
-    """
+async def search_rules(query: str, limit: int = 10, rule_ids: Optional[List[str]] = None, category_ids: Optional[List[str]] = None) -> List[TextContent]:
+   
     try:
-        print(f"[SEARCH RULES] Query: '{query}', limit: {limit}, rule_ids: {rule_ids}, category_id: {category_id}")
+        print(f"[SEARCH RULES] Query: '{query}', limit: {limit}, rule_ids: {rule_ids}, category_ids: {category_ids}")
         
         async with app_container() as container:
             # Получаем зависимости
@@ -65,16 +34,26 @@ async def search_rules(query: str, limit: int = 10, rule_ids: Optional[List[str]
             
             # Выполняем векторный поиск
             filters = None
+            must_conditions = []
+            
             if rule_ids:
-                
-                filters = QdrantFilters(
-                    must=[
-                        FieldCondition(
-                            key="rule_id",
-                            match=MatchAny(any=rule_ids)
-                        )
-                    ]
+                must_conditions.append(
+                    FieldCondition(
+                        key="rule_id",
+                        match=MatchAny(any=rule_ids)
+                    )
                 )
+                
+            if category_ids:
+                must_conditions.append(
+                    FieldCondition(
+                        key="category_id",
+                        match=MatchAny(any=category_ids)
+                    )
+                )
+            
+            if must_conditions:
+                filters = QdrantFilters(must=must_conditions)
             
             search_results = await qdrant_embeddings_repository.search_similar(
                 collection_name=Collections.RULES_EMBEDDINGS,
@@ -97,29 +76,25 @@ async def search_rules(query: str, limit: int = 10, rule_ids: Optional[List[str]
             for result in search_results:
                 payload = result.payload
                 
-                # Фильтруем по category_id если указан
-                if category_id and payload.get("category_id") != category_id:
-                    continue
                 
                 results.append({
                     "rule_id": payload.get("rule_id"),
                     "rule_title": payload.get("rule_title"),
                     "category_id": payload.get("category_id"),
                     "category_title": payload.get("category_title"),
+                    "description": payload.get("content"),
                     "relevance_score": round(result.score, 3),
                 })
             
             # Сортируем по релевантности
             results.sort(key=lambda x: x["relevance_score"], reverse=True)
             
-            # Ограничиваем до запрошенного лимита
-            results = results[:limit]
             
             # Форматируем результат для LLM
             if rule_ids:
                 response = f"📋 Found {len(results)} rules matching '{query}' (search limited to {len(rule_ids)} specified rules):\n\n"
-            elif category_id:
-                response = f"📋 Found {len(results)} rules matching '{query}' in specified category:\n\n"
+            elif category_ids:
+                response = f"📋 Found {len(results)} rules matching '{query}' in specified categories:\n\n"
             else:
                 response = f"📋 Found {len(results)} rules matching '{query}':\n\n"
             
@@ -128,6 +103,7 @@ async def search_rules(query: str, limit: int = 10, rule_ids: Optional[List[str]
                 response += f"   🆔 Rule ID: {rule['rule_id']}\n"
                 response += f"   📂 Category: {rule['category_title']} (ID: {rule['category_id']})\n"
                 response += f"   ⭐ Relevance: {rule['relevance_score']:.3f}\n"
+                response += f"   📝 Content: {rule['description']}\n"
                 response += "\n"
             
             return [TextContent(type="text", text=response)]
