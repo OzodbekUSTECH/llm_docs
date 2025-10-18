@@ -28,7 +28,7 @@ def format_datetime(date_obj, include_time=True):
     except Exception:
         return "Invalid Date"
 
-async def search_documents(query: str, limit: int = 10, document_ids: Optional[List[str]] = None, document_types: Optional[List[str]] = None) -> List[TextContent]:
+async def search_documents(query: str, limit: int = 15, document_ids: Optional[List[str]] = None, document_types: Optional[List[str]] = None) -> List[TextContent]:
     """
     Search for relevant documents using semantic vector search. Returns document metadata and keywords.
     

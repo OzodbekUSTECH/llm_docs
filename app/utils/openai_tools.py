@@ -30,7 +30,7 @@ OPENAI_TOOLS = [
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of documents to return. Higher values provide more context but may include less relevant results",
-                        "default": 10,
+                        "default": 15,
                         "minimum": 1,
                         "maximum": 20
                     },
