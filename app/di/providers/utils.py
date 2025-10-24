@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 from app.services.extract_text_from_file import DocumentParserOpenAI
 from app.services.keyword_extractor import KeywordExtractor
 from app.services.contract_section_extractor import ContractSectionExtractor
+from app.services.document_chunker import DocumentChunker
 from huggingface_hub import snapshot_download
 
 class UtilsProvider(Provider):
@@ -67,6 +68,8 @@ class UtilsProvider(Provider):
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
         )
+    
+    
    
     @provide
     def provide_ollama_client(self) -> AsyncClient:
@@ -100,46 +103,6 @@ class UtilsProvider(Provider):
         """
         pipeline_options = PdfPipelineOptions()
         
-        # Основные настройки OCR и таблиц с GPU оптимизацией
-        pipeline_options.do_ocr = True  # Включаем OCR для отсканированных PDF
-        pipeline_options.do_table_structure = True  # Извлекаем структуру таблиц
-        pipeline_options.do_formula_enrichment = True  # Включаем распознавание формул
-        pipeline_options.do_code_enrichment = True  # Включаем распознавание кода/символов
-        pipeline_options.table_structure_options.do_cell_matching = True  # Включаем сопоставление ячеек
-        
-        # GPU оптимизированные настройки
-        pipeline_options.images_scale = 2.0  # Увеличиваем масштаб для лучшего распознавания
-        pipeline_options.generate_page_images = True  # Генерируем изображения страниц
-        pipeline_options.generate_table_images = True  # Генерируем изображения таблиц
-
-        # pipeline_options.accelerator_options = AcceleratorOptions(
-        #     device=AcceleratorDevice.AUTO,  # Автовыбор: CUDA > MPS > CPU
-        # )
-        
-        # Дополнительные настройки для лучшего извлечения таблиц
-        
-        # Настройки для лучшего распознавания таблиц
-        # Убираем mode так как это вызывает Pydantic warning
-        
-        # # Настройки масштабирования для лучшего качества
-        # pipeline_options.images_scale = 2.0  # Увеличиваем масштаб для лучшего распознавания
-        # pipeline_options.generate_page_images = True  # Генерируем изображения страниц
-        # pipeline_options.generate_table_images = True  # Генерируем изображения таблиц
-        
-        # Специальные настройки OCR для химических формул и таблиц
-        # Используем EasyOCR для лучшего распознавания таблиц
-        # ocr_options = EasyOcrOptions(
-        #     lang=["ru", "en"],                 # языки: русский и английский (китайский не нужен)
-        #     force_full_page_ocr=True,          # распознавать всю страницу целиком (лучше для сканов)
-        #     bitmap_area_threshold=0.005,       # еще более низкий порог для мелких символов в таблицах
-        #     # Убираем use_gpu так как это deprecated - GPU управляется через accelerator_options
-        #     confidence_threshold=0.3,          # еще более мягкий порог для таблиц
-        #     model_storage_directory="./models",# где хранить загруженные модели EasyOCR
-        #     recog_network="standard",          # стандартная сеть (можно 'latin_g2' для смешанных языков)
-        #     download_enabled=True,             # разрешить автозагрузку моделей
-        #     suppress_mps_warnings=True         # убрать предупреждения macOS MPS
-        # )
-        
         download_path = snapshot_download(repo_id="SWHL/RapidOCR")
 
         # Setup RapidOcrOptions for english detection
@@ -156,88 +119,28 @@ class UtilsProvider(Provider):
             det_model_path=det_model_path,
             rec_model_path=rec_model_path,
             cls_model_path=cls_model_path,
-            # CUDA settings for RTX 4060
-            backend="onnxruntime",  # ONNX Runtime with CUDA support
-            lang=["english"],  # English language for better performance
-            force_full_page_ocr=True,  # OCR entire page
-            bitmap_area_threshold=0.01,  # Low threshold for small text
-            text_score=0.3,  # Confidence threshold
-            use_det=True,  # Enable text detection
-            use_cls=True,  # Enable text classification
-            use_rec=True,  # Enable text recognition
-            print_verbose=False,  # Disable verbose logging
         )
         
         pipeline_options.ocr_options = ocr_options
         
         pipeline_options.accelerator_options = AcceleratorOptions(
-            num_threads=8,  # Оптимально для RTX 4060
-            device=AcceleratorDevice.CUDA,  # Принудительно используем CUDA
-            cuda_use_flash_attention2=True,  # Flash Attention для скорости
+            device=AcceleratorDevice.AUTO,
         )
         
 
         return pipeline_options
     
-    # @provide
-    # def provide_pdf_pipeline_options_tesseract(self) -> PdfPipelineOptions:
-    #     """
-    #     Альтернативная конфигурация с Tesseract для случаев, когда RapidOCR не работает.
-    #     Специально настроено для лучшего распознавания таблиц с химическими формулами.
-    #     """
-    #     pipeline_options = PdfPipelineOptions()
-        
-    #     # Основные настройки OCR и таблиц
-        # pipeline_options.do_ocr = True  # Включаем OCR для отсканированных PDF
-        # pipeline_options.do_table_structure = True  # Извлекаем структуру таблиц
-    #     pipeline_options.do_formula_enrichment = True  # Включаем распознавание формул
-    #     pipeline_options.do_code_enrichment = True  # Включаем распознавание кода/символов
-        
-    #     # Настройки для лучшего распознавания таблиц
-    #     pipeline_options.table_structure_options.do_cell_matching = False  # Отключаем для лучшего распознавания структуры
-    #     # pipeline_options.table_structure_options.mode = "accurate"  # Точный режим для таблиц
-        
-    #     # Настройки масштабирования для лучшего качества
-    #     # pipeline_options.images_scale = 2.0  # Увеличиваем масштаб для лучшего распознавания
-    #     pipeline_options.generate_page_images = True  # Генерируем изображения страниц
-    #     pipeline_options.generate_table_images = True  # Генерируем изображения таблиц
-        
-    #     # Специальные настройки Tesseract OCR для химических формул и таблиц
-    #     ocr_options = TesseractCliOcrOptions(
-    #         force_full_page_ocr=True,  # Принудительное OCR всей страницы
-    #         # Языки для распознавания (английский + русский для лучшего распознавания формул)
-    #         lang=["eng", "rus"],
-    #         # Очень низкий порог для распознавания мелких символов в таблицах
-    #         bitmap_area_threshold=0.01,  # 1% - очень низкий порог для мелких элементов
-    #         # Путь к исполняемому файлу Tesseract
-    #         tesseract_cmd="tesseract",
-    #         # Путь к данным Tesseract (если нужно)
-    #         path=None
-    #     )
-    #     pipeline_options.ocr_options = ocr_options
-
-    #     return pipeline_options
     
     @provide
     def provide_document_converter(
         self, 
-        pipeline_options: PdfPipelineOptions, 
     ) -> DocumentConverter:
         """
         Создает DocumentConverter с явным указанием OCR-движка RapidOCR.
         """
         print(f"🔄 Настраиваем Docling DocumentConverter")
-
-        # Применяем accelerator к pipeline_options
-
-        converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(
-                    pipeline_options=pipeline_options,
-                )
-            },
-        )
-        return converter
+        return DocumentConverter()
+    
     
     @provide
     def provide_huggingface_tokenizer(self) -> HuggingFaceTokenizer:
@@ -254,25 +157,53 @@ class UtilsProvider(Provider):
     @provide
     def provide_docling_chunker(self, tokenizer: HuggingFaceTokenizer) -> HybridChunker:
         """
-        Создает HybridChunker для интеллектуального разделения документов.
+        Умный HybridChunker для Markdown-документов.
         
-        HybridChunker:
-        - Уважает структуру документа (заголовки, параграфы)
-        - Добавляет контекст из заголовков к чанкам
-        - Учитывает токены, а не символы
-        - Объединяет маленькие чанки (merge_peers=True)
+        Особенности:
+        - Делит по заголовкам (#, ##, ###)
+        - Делит жирные подзаголовки (**text**) как смысловые блоки
+        - Добавляет родительский контекст заголовков к каждому чанку
+        - Не ломает списки, таблицы и код-блоки
+        - Разделяет длинные параграфы по предложениям
+        - Объединяет мелкие чанки (<40 токенов) с соседними
         """
-        print(f"🔄 Настраиваем HybridChunker: max_tokens={self.MAX_CHUNK_TOKENS}, merge_peers=True")
-        
-        return HybridChunker(
+
+        print(f"⚙️ Настраиваем Markdown-aware HybridChunker: max_tokens={self.MAX_CHUNK_TOKENS}")
+
+        chunker = HybridChunker(
             tokenizer=tokenizer,
-            merge_peers=True,  # Объединяем соседние маленькие чанки
+            merge_peers=True,
+            respect_hierarchy=True,          # Уважает иерархию заголовков
+            add_parent_headings=True,        # Добавляет родительские заголовки в контекст чанка
+            sentence_split=True,             # Делит длинные абзацы по предложениям
+            max_tokens=self.MAX_CHUNK_TOKENS,
+            min_chunk_tokens=40,
+            overlap_tokens=self.CHUNK_OVERLAP_TOKENS,
+            merge_small_chunks=True,
+            weight_structure=True,
+            include_inline_formatting=True,  # Учитывает **жирный**, _курсив_, `код`
         )
-    
+
+        # Конфиг специально под Markdown
+
+        return chunker
     
     @provide
     def provide_openai_client(self) -> AsyncOpenAI:
         """Создает клиент для OpenAI."""
         return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    
+    @provide
+    def provide_document_chunker(self) -> DocumentChunker:
+        """
+        Создает кастомный чанкер для структурированного деления документов.
+        Использует те же параметры что и эмбеддинги для согласованности.
+        """
+        print(f"🔄 Создаем DocumentChunker с max_tokens={self.MAX_CHUNK_TOKENS}")
+        return DocumentChunker(
+            tokenizer_model=self.EMBEDDING_MODEL,
+            max_tokens=self.MAX_CHUNK_TOKENS,
+            overlap_tokens=self.CHUNK_OVERLAP_TOKENS,
+        )
     
     

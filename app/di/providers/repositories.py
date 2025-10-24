@@ -3,6 +3,8 @@ from app.repositories.documents import DocumentsRepository
 from app.repositories.qdrant_embeddings import QdrantEmbeddingsRepository
 from app.repositories.uow import UnitOfWork
 from app.repositories.rules import RulesRepository, RuleCategoriesRepository
+from app.repositories.sources import SourcesRepository
+from app.repositories.indexes import IndexesRepository
 
 class RepositoriesProvider(Provider):
 
@@ -14,4 +16,6 @@ class RepositoriesProvider(Provider):
         RuleCategoriesRepository,
         DocumentsRepository,
         QdrantEmbeddingsRepository,
+        SourcesRepository,
+        IndexesRepository,
     )

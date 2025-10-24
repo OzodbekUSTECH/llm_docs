@@ -186,6 +186,417 @@
             width: 100%;
             height: 100vh;
             background: var(--main-bg);
+            min-width: 0; /* Allow shrinking */
+        }
+
+        /* Information Panel */
+        .info-panel {
+            width: 380px;
+            background: var(--secondary-bg);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .info-panel.collapsed {
+            width: 0;
+            border-left: none;
+        }
+
+        .info-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            background: var(--main-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-panel-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .info-icon {
+            font-size: 20px;
+        }
+
+        .info-panel-toggle {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .info-panel-toggle:hover {
+            background: var(--hover-bg);
+            color: var(--text-primary);
+        }
+
+        .info-panel.collapsed .info-panel-toggle svg {
+            transform: rotate(180deg);
+        }
+
+        .info-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .info-panel-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .info-panel-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .info-panel-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        .info-panel-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-text {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .empty-hint {
+            font-size: 13px;
+            opacity: 0.7;
+        }
+
+        /* Document Card */
+        .doc-card {
+            background: var(--main-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .doc-card.collapsed {
+            padding: 12px 16px;
+        }
+
+        .doc-card:hover {
+            box-shadow: var(--shadow-md);
+            border-color: var(--accent-color);
+        }
+        
+        .docs-section {
+            margin-bottom: 20px;
+        }
+        
+        .section-header {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%);
+            border-left: 3px solid var(--accent-color);
+            border-radius: 4px;
+        }
+        
+        .doc-header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        
+        .doc-expand-btn {
+            background: none;
+            border: none;
+            color: var(--accent-color);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 4px 8px;
+            transition: transform 0.2s;
+        }
+        
+        .doc-expand-btn:hover {
+            transform: scale(1.2);
+        }
+        
+        .doc-body {
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .doc-card-header {
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .doc-rank {
+            background: var(--accent-color);
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            min-width: 32px;
+            text-align: center;
+        }
+
+        .doc-scores {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            margin-left: 12px;
+        }
+
+        .doc-score-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .score-label {
+            min-width: 70px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .score-progress {
+            flex: 1;
+            height: 6px;
+            background: var(--secondary-bg);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .score-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .score-progress-fill.semantic {
+            background: linear-gradient(90deg, #10a37f 0%, #0f9b73 100%);
+        }
+
+        .score-progress-fill.keyword {
+            background: linear-gradient(90deg, #6366f1 0%, #4f46e5 100%);
+        }
+
+        .score-progress-fill.final {
+            background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+        }
+        
+        .score-progress-fill.llm {
+            background: linear-gradient(90deg, #a855f7 0%, #7c3aed 100%);
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+        }
+
+        .score-value {
+            min-width: 42px;
+            text-align: right;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .doc-metadata {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: var(--secondary-bg);
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .metadata-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .metadata-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            min-width: 50px;
+        }
+
+        .metadata-value {
+            color: var(--text-primary);
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .doc-content {
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            background: var(--secondary-bg);
+            padding: 12px;
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            transition: max-height 0.3s ease;
+            position: relative;
+        }
+
+        .doc-content.expanded {
+            max-height: none;
+        }
+
+        .doc-content-toggle {
+            position: sticky;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to bottom, transparent, var(--secondary-bg) 50%);
+            padding: 8px 0 4px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .doc-content-toggle-btn {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .doc-content-toggle-btn:hover {
+            background: #0d8c6a;
+            transform: translateY(-1px);
+        }
+
+        .doc-content::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .doc-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+
+        .rerank-badge {
+            background: #8b5cf6;
+            color: white;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        /* Citation highlight */
+        .citation-highlight {
+            background: linear-gradient(120deg, #d4fc79 0%, #96e6a1 100%);
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+            box-shadow: 0 1px 3px rgba(134, 239, 172, 0.3);
+            border-left: 3px solid #10a37f;
+            display: inline;
+            line-height: 1.8;
+        }
+
+        /* Clickable inline citation links */
+        .citation-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #e0f2fe;
+            color: #0369a1;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 0.85em;
+            padding: 2px 7px;
+            border-radius: 4px;
+            border: 1.5px solid #7dd3fc;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin: 0 2px;
+            vertical-align: baseline;
+        }
+
+        .citation-link:hover {
+            background: #bae6fd;
+            border-color: #0369a1;
+            color: #0c4a6e;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(3, 105, 161, 0.3);
+        }
+
+        .citation-link:active {
+            transform: translateY(0);
+        }
+
+        /* Highlight document card when referenced */
+        .doc-card.highlight-active {
+            animation: highlightPulse 1s ease;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2);
+        }
+
+        @keyframes highlightPulse {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2); }
+            50% { box-shadow: 0 0 0 6px rgba(16, 163, 127, 0.4); }
+        }
+        
+        @keyframes pulse-highlight {
+            0%, 100% { 
+                background: linear-gradient(120deg, #d4fc79 0%, #96e6a1 100%);
+                box-shadow: 0 1px 3px rgba(134, 239, 172, 0.3);
+            }
+            50% { 
+                background: linear-gradient(120deg, #b8e673 0%, #7ad08a 100%);
+                box-shadow: 0 2px 8px rgba(134, 239, 172, 0.6);
+                transform: scale(1.02);
+            }
         }
 
         .chat-header {
@@ -264,6 +675,7 @@
         .message-group {
             width: 100%;
             border-bottom: 1px solid var(--border-color);
+            position: relative;
         }
 
         .message-group.user {
@@ -272,6 +684,31 @@
 
         .message-group.assistant {
             background: var(--assistant-bg);
+            transition: background 0.2s ease;
+        }
+        
+        .message-group.assistant:hover {
+            background: rgba(247, 247, 248, 0.8);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .message-group.assistant[data-metadata]:hover {
+            cursor: pointer;
+        }
+        
+        .message-group.assistant[data-metadata]:hover::after {
+            content: "📊 Click to view documents";
+            position: absolute;
+            right: 20px;
+            top: 10px;
+            background: rgba(16, 163, 127, 0.9);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            pointer-events: none;
+            opacity: 0.8;
         }
 
         .message-wrapper {
@@ -538,139 +975,6 @@
             margin: 24px 0;
         }
 
-        /* Tool Calls Styling */
-        .tool-calls-container {
-            margin-bottom: 20px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--secondary-bg);
-            overflow: hidden;
-        }
-
-        .tool-calls-details {
-            margin: 0;
-        }
-
-        .tool-calls-details[open] .tool-calls-toggle {
-            transform: rotate(180deg);
-        }
-
-        .tool-calls-summary {
-            list-style: none;
-            padding: 12px 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 500;
-            font-size: 14px;
-            color: var(--text-secondary);
-            background: var(--hover-bg);
-            user-select: none;
-            transition: background 0.2s;
-        }
-
-        .tool-calls-summary:hover {
-            background: var(--border-color);
-        }
-
-        .tool-calls-summary::-webkit-details-marker {
-            display: none;
-        }
-
-        .tool-calls-icon {
-            font-size: 16px;
-        }
-
-        .tool-calls-title {
-            flex: 1;
-        }
-
-        .tool-calls-toggle {
-            transition: transform 0.2s;
-            font-size: 12px;
-        }
-
-        .tool-calls-list {
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .tool-call-item {
-            background: var(--main-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 12px;
-            transition: all 0.2s;
-        }
-
-        .tool-call-item.pending {
-            border-left: 3px solid #fbbf24;
-        }
-
-        .tool-call-item.success {
-            border-left: 3px solid #10b981;
-        }
-
-        .tool-call-item.error {
-            border-left: 3px solid #ef4444;
-        }
-
-        .tool-call-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        .tool-call-status {
-            font-size: 16px;
-        }
-
-        .tool-call-name {
-            font-weight: 600;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 14px;
-            color: var(--accent-color);
-        }
-
-        .tool-call-args, .tool-call-output {
-            margin-top: 8px;
-        }
-
-        .tool-call-args pre, .tool-call-output pre {
-            margin: 0;
-            background: #1e1e1e;
-            padding: 8px;
-            border-radius: 4px;
-            overflow-x: auto;
-            font-size: 12px;
-        }
-
-        .tool-call-args code, .tool-call-output code {
-            color: #e5e7eb;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        }
-
-        .tool-call-event {
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 13px;
-            background: var(--main-bg);
-            border-left: 2px solid var(--border-color);
-        }
-
-        .tool-call-event.iteration {
-            border-left-color: #3b82f6;
-            background: #eff6ff;
-        }
-
-        .tool-call-event.thinking {
-            border-left-color: #8b5cf6;
-            background: #f5f3ff;
-        }
 
         /* Streaming cursor animation */
         .streaming-cursor {
@@ -743,197 +1047,6 @@
             }
         }
 
-        .ai-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 16px;
-            padding-top: 12px;
-            border-top: 1px solid var(--border-color);
-            flex-wrap: wrap;
-        }
-
-        .action-badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: transparent;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            font-size: 13px;
-            color: var(--text-secondary);
-            cursor: pointer;
-            transition: all 0.2s;
-            user-select: none;
-        }
-
-        .action-badge:hover {
-            background: var(--hover-bg);
-            border-color: var(--text-secondary);
-        }
-
-        .action-badge.reasoning {
-            border-color: #f59e0b;
-            color: #f59e0b;
-        }
-
-        .action-badge.reasoning:hover {
-            background: #fef3c7;
-        }
-
-        .action-badge.tools {
-            border-color: #3b82f6;
-            color: #3b82f6;
-        }
-
-        .action-badge.tools:hover {
-            background: #dbeafe;
-        }
-
-        .action-badge.completed {
-            border-color: var(--accent-color);
-            color: var(--accent-color);
-        }
-
-        .action-badge.completed:hover {
-            background: #d1fae5;
-        }
-
-        .action-badge.process {
-            border-color: #8b5cf6;
-            color: #8b5cf6;
-        }
-
-        .action-badge.process:hover {
-            background: #ede9fe;
-        }
-
-        .action-icon {
-            font-size: 14px;
-        }
-
-        .reasoning-section {
-            margin-top: 12px;
-            padding: 12px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border-left: 4px solid #007bff;
-            display: none;
-        }
-
-        .reasoning-section.show {
-            display: block;
-        }
-
-        .reasoning-content {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 13px;
-            line-height: 1.5;
-            color: #333;
-            white-space: pre-wrap;
-            background: #ffffff;
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #e1e5e9;
-        }
-
-        .tool-call-section {
-            margin-top: 12px;
-            padding: 12px;
-            background: #f0f8ff;
-            border-radius: 8px;
-            border-left: 4px solid #28a745;
-            display: none;
-        }
-
-        .tool-call-section.show {
-            display: block;
-        }
-
-        .tool-call-item {
-            margin-bottom: 8px;
-            padding: 8px;
-            background: #ffffff;
-            border-radius: 6px;
-            border: 1px solid #e1e5e9;
-        }
-
-        .tool-call-name {
-            font-weight: 600;
-            color: #007bff;
-            margin-bottom: 4px;
-        }
-
-        .tool-call-args {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 12px;
-            color: #666;
-            background: #f8f9fa;
-            padding: 4px 8px;
-            border-radius: 4px;
-            margin-bottom: 4px;
-        }
-
-        .tool-call-output {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 12px;
-            color: #28a745;
-            background: #f0f8ff;
-            padding: 4px 8px;
-            border-radius: 4px;
-        }
-
-        .reasoning-section {
-            background: var(--hover-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin: 16px 0;
-            overflow: hidden;
-        }
-
-        .reasoning-header {
-            background: transparent;
-            padding: 12px 16px;
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
-            transition: background-color 0.2s;
-        }
-
-        .reasoning-header:hover {
-            background: rgba(0, 0, 0, 0.02);
-        }
-
-        .reasoning-toggle {
-            font-size: 14px;
-            transition: transform 0.2s;
-        }
-
-        .reasoning-toggle.expanded {
-            transform: rotate(180deg);
-        }
-
-        .reasoning-content {
-            padding: 16px;
-            font-size: 14px;
-            line-height: 1.75;
-            color: var(--text-primary);
-            font-style: italic;
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease-out;
-            border-top: 1px solid var(--border-color);
-        }
-
-        .reasoning-content.expanded {
-            max-height: 500px;
-        }
 
         /* Collapsible sections - unified styling */
         .collapsible-section {
@@ -943,6 +1056,14 @@
             margin: 16px 0;
             overflow: hidden;
             transition: all 0.3s ease;
+        }
+        
+        .collapsible-section.collapsed .section-content {
+            display: none;
+        }
+        
+        .collapsible-section.collapsed .section-arrow {
+            transform: rotate(-90deg);
         }
 
         .section-header {
@@ -985,190 +1106,15 @@
             background: white;
         }
 
-        /* Sources specific styles */
-        .source-item {
-            margin-bottom: 16px;
-            padding: 12px;
-            background: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            transition: all 0.2s;
+        .debug-section .section-content {
+            padding: 0;
+        }
+        
+        .debug-messages {
+            max-height: 200px;
+            overflow-y: auto;
         }
 
-        .source-item:hover {
-            border-color: var(--accent-color);
-            box-shadow: 0 2px 8px rgba(16, 163, 127, 0.1);
-        }
-
-        .source-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 12px;
-            gap: 12px;
-        }
-
-        .source-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .source-title strong {
-            color: var(--text-primary);
-            font-size: 14px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .file-icon {
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-
-        .source-meta {
-            display: flex;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-
-        .similarity-badge, .chunk-badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 500;
-            white-space: nowrap;
-        }
-
-        .similarity-badge {
-            background: #dcfce7;
-            color: #15803d;
-            border: 1px solid #86efac;
-        }
-
-        .chunk-badge {
-            background: #dbeafe;
-            color: #1e40af;
-            border: 1px solid #93c5fd;
-        }
-
-        .source-content-wrapper {
-            position: relative;
-        }
-
-        .source-content {
-            max-height: 120px;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .source-content.expanded {
-            max-height: none;
-        }
-
-        .source-text {
-            margin: 0;
-            padding: 12px;
-            background: white;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 12px;
-            line-height: 1.6;
-            color: var(--text-primary);
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .expand-button {
-            width: 100%;
-            margin-top: 8px;
-            padding: 8px 12px;
-            background: white;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            color: var(--accent-color);
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-        }
-
-        .expand-button:hover {
-            background: var(--hover-bg);
-            border-color: var(--accent-color);
-        }
-
-        .expand-icon {
-            font-size: 10px;
-            transition: transform 0.3s;
-        }
-
-        /* Reasoning specific styles */
-        .reasoning-text {
-            padding: 12px;
-            background: #fefce8;
-            border: 1px solid #fef08a;
-            border-radius: 6px;
-            font-size: 14px;
-            line-height: 1.7;
-            color: var(--text-primary);
-            font-style: italic;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .tool-call-section {
-            background: var(--hover-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            margin: 16px 0;
-            overflow: hidden;
-        }
-
-        .tool-call-header {
-            background: transparent;
-            padding: 12px 16px;
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
-            transition: background-color 0.2s;
-        }
-
-        .tool-call-header:hover {
-            background: rgba(0, 0, 0, 0.02);
-        }
-
-        .tool-call-toggle {
-            font-size: 14px;
-            transition: transform 0.2s;
-        }
-
-        .tool-call-toggle.expanded {
-            transform: rotate(180deg);
-        }
-
-        .tool-call-content {
-            padding: 16px;
-            font-size: 14px;
-            line-height: 1.6;
-            color: var(--text-primary);
-            font-family: 'Consolas', 'Monaco', monospace;
-            display: block;
-            border-top: 1px solid var(--border-color);
-        }
 
         .typing-indicator {
             display: none;
@@ -1233,189 +1179,6 @@
             }
         }
 
-        .ai-status-panel {
-            background: #f8f9fa;
-            border: 1px solid #e5e5e5;
-            border-radius: 8px;
-            margin: 12px 0;
-            overflow: hidden;
-        }
-
-        .ai-status-header {
-            background: #e3f2fd;
-            padding: 8px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #1565c0;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .ai-status-content {
-            padding: 12px;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #333;
-        }
-
-        .status-step {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin: 4px 0;
-            padding: 4px 0;
-        }
-
-        .status-step.completed {
-            color: #28a745;
-        }
-
-        .status-step.current {
-            color: #007bff;
-            font-weight: 600;
-        }
-
-        .status-step.pending {
-            color: #6c757d;
-        }
-
-        .status-icon {
-            width: 16px;
-            height: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-        }
-
-        .status-text {
-            flex: 1;
-        }
-
-        .status-time {
-            font-size: 11px;
-            color: #8e8ea0;
-        }
-
-        .detailed-log {
-            background: #f1f3f4;
-            border: 1px solid #dadce0;
-            border-radius: 6px;
-            margin: 8px 0;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .log-entry {
-            padding: 6px 12px;
-            border-bottom: 1px solid #e8eaed;
-            font-size: 12px;
-            font-family: 'Monaco', 'Menlo', monospace;
-        }
-
-        .log-entry:last-child {
-            border-bottom: none;
-        }
-
-        .log-entry.info {
-            color: #1a73e8;
-        }
-
-        .log-entry.success {
-            color: #137333;
-        }
-
-        .log-entry.warning {
-            color: #ea8600;
-        }
-
-        .log-entry.error {
-            color: #d93025;
-        }
-
-        .log-timestamp {
-            color: #5f6368;
-            margin-right: 8px;
-        }
-
-        .ai-process-panel {
-            background: #f8f9fa;
-            border: 1px solid #e5e5e5;
-            border-radius: 8px;
-            margin: 12px 0;
-            overflow: hidden;
-        }
-
-        .process-header {
-            background: #e1f5fe;
-            padding: 8px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #0277bd;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
-            transition: background-color 0.2s;
-        }
-
-        .process-header:hover {
-            background: #b3e5fc;
-        }
-
-        .process-content {
-            padding: 12px;
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease-out;
-        }
-
-        .ai-process-panel.show .process-content {
-            max-height: 500px;
-        }
-
-        .process-step {
-            margin-bottom: 12px;
-            padding: 8px;
-            background: #ffffff;
-            border-radius: 6px;
-            border-left: 4px solid #0277bd;
-        }
-
-        .process-step:last-child {
-            margin-bottom: 0;
-        }
-
-        .step-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
-        }
-
-        .step-icon {
-            font-size: 14px;
-        }
-
-        .step-name {
-            font-weight: 600;
-            color: #0277bd;
-            font-size: 13px;
-        }
-
-        .step-status {
-            margin-left: auto;
-            color: #28a745;
-            font-size: 12px;
-        }
-
-        .step-content {
-            font-size: 12px;
-            color: #666;
-            line-height: 1.4;
-        }
 
         .chat-input-container {
             background: var(--main-bg);
@@ -1467,28 +1230,7 @@
             color: var(--text-secondary);
         }
 
-        .model-select {
-            padding: 8px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 14px;
-            color: var(--text-primary);
-            background: var(--main-bg);
-            cursor: pointer;
-            transition: all 0.2s;
-            flex-shrink: 0;
-            font-family: inherit;
-        }
-
-        .model-select:hover {
-            border-color: var(--accent-color);
-        }
-
-        .model-select:focus {
-            outline: none;
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
-        }
+        /* Model selector removed - using server-side default */
 
         .send-button {
             width: 40px;
@@ -1572,9 +1314,30 @@
             background: var(--text-secondary);
         }
 
+            @media (max-width: 1024px) {
+                .info-panel {
+                    width: 320px;
+                }
+        }
+
         @media (max-width: 768px) {
             .chat-container {
                 height: 100vh;
+            }
+                
+                .info-panel {
+                    position: absolute;
+                    right: 0;
+                    top: 0;
+                    height: 100vh;
+                    width: 100%;
+                    max-width: 380px;
+                    z-index: 30;
+                    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+                }
+                
+                .info-panel.collapsed {
+                    transform: translateX(100%);
             }
 
             .message-wrapper {
@@ -1607,13 +1370,6 @@
 
             .chat-input-form {
                 padding: 0 12px;
-                flex-wrap: wrap;
-            }
-
-            .model-select {
-                order: -1;
-                width: 100%;
-                margin-bottom: 12px;
             }
         }
     </style>
@@ -1679,19 +1435,35 @@
                             autocomplete="off"
                         ></textarea>
                     </div>
-                    <select id="model-select" class="model-select" title="Select OpenAI Model">
-                        <option value="gpt-5-mini" selected>🧠 GPT-5 mini (default)</option>
-                        <option value="gpt-5-nano">✨ gpt-5-nano</option>
-                        <option value="gpt-4o-mini">🚀 GPT-4o Mini (fast)</option>
-                        <option value="gpt-4o">⭐ GPT-4o (quality)</option>
-                        <option value="gpt-3.5-turbo">💰 GPT-3.5 Turbo (cheap)</option>
-                    </select>
+                    <!-- Model selector removed - using server-side default (gpt-4o-mini) -->
                     <button type="submit" class="send-button" id="send-button">
                         <svg class="send-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
                         </svg>
                     </button>
                 </form>
+            </div>
+        </div>
+
+        <!-- Information Panel -->
+        <div class="info-panel" id="info-panel">
+            <div class="info-panel-header">
+                <div class="info-panel-title">
+                    <span class="info-icon">📊</span>
+                    <span>Retrieved Documents</span>
+                </div>
+                <button class="info-panel-toggle" id="info-panel-toggle" title="Toggle panel">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
+            </div>
+            <div class="info-panel-content" id="info-panel-content">
+                <div class="info-panel-empty">
+                    <div class="empty-icon">🔍</div>
+                    <div class="empty-text">No documents retrieved yet</div>
+                    <div class="empty-hint">Send a message to see retrieved documents</div>
+                </div>
             </div>
         </div>
     </div>
@@ -1719,6 +1491,10 @@
                 this.abortController = null;
                 this.streamingChatId = null;  // Track which chat is streaming
                 
+                // Retrieved documents for info panel
+                this.retrievedDocs = [];
+                this.citationHighlights = {}; // Map: doc_rank -> excerpt
+                
                 this.initializeElements();
                 this.bindEvents();
                 this.updateSessionId();
@@ -1736,7 +1512,11 @@
                 this.sessionIdElement = document.getElementById('session-id');
                 this.chatsList = document.getElementById('chats-list');
                 this.newChatBtn = document.getElementById('new-chat-btn');
-                this.modelSelect = document.getElementById('model-select');
+                
+                // Info panel elements
+                this.infoPanel = document.getElementById('info-panel');
+                this.infoPanelContent = document.getElementById('info-panel-content');
+                this.infoPanelToggle = document.getElementById('info-panel-toggle');
             }
 
             bindEvents() {
@@ -1756,18 +1536,10 @@
                     this.createNewChat();
                 });
 
-                // Save selected model
-                this.modelSelect.addEventListener('change', () => {
-                    localStorage.setItem('selectedModel', this.modelSelect.value);
-                    console.log('Model changed to:', this.modelSelect.value);
+                // Info panel toggle
+                this.infoPanelToggle.addEventListener('click', () => {
+                    this.toggleInfoPanel();
                 });
-
-                // Restore selected model
-                const savedModel = localStorage.getItem('selectedModel');
-                if (savedModel) {
-                    this.modelSelect.value = savedModel;
-                    console.log('Restored model:', savedModel);
-                }
             }
 
             setupAutoResize() {
@@ -1849,14 +1621,16 @@
                  
                  // Reset streaming content
                  this.currentStreamingContent = '';
+                
+                // Clear info panel for new query
+                this.clearInfoPanel();
                  
                  // Create new abort controller for this request
                  this.abortController = new AbortController();
                  this.streamingChatId = this.currentChatId;
 
                 try {
-                    const selectedModel = this.modelSelect.value || 'gpt-4o-mini';
-                    const response = await fetch(`/chat/generate-openai?chat_id=${this.currentChatId}&model=${selectedModel}&stream=true`, {
+                    const response = await fetch(`/chat/generate?chat_id=${this.currentChatId}`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -1864,7 +1638,8 @@
                         credentials: 'include',
                         signal: this.abortController.signal,
                         body: JSON.stringify({
-                            message: message
+                            message: message,
+                            stream: true
                         })
                     });
 
@@ -1892,8 +1667,7 @@
                  const reader = response.body.getReader();
                  const decoder = new TextDecoder();
                  let buffer = '';
-                 let toolCallsContainer = null;
-                 let currentToolElement = null;
+                 let debugContainer = null;
 
                  try {
                      while (true) {
@@ -1910,58 +1684,54 @@
                                     const event = JSON.parse(line.slice(6));
                                     console.log('Stream event:', event);
                                     
-                                    // Проверяем, что мы все еще в том же чате
+                                    // Check if we're still in the same chat
                                     if (this.streamingChatId && this.streamingChatId !== this.currentChatId) {
                                         console.log('Ignoring event - chat switched');
                                         continue;
                                     }
                                     
-                                    switch(event.type) {
-                                         case 'start':
-                                             // Create assistant message with tool calls section
-                                             this.currentAssistantMessage = this.createAssistantMessage();
-                                             toolCallsContainer = this.createToolCallsContainer();
-                                             this.currentAssistantMessage.querySelector('.message-content').insertBefore(
-                                                 toolCallsContainer, 
-                                                 this.currentAssistantMessage.querySelector('.message-content').firstChild
-                                             );
-                                             break;
-                                             
-                                         case 'iteration':
-                                             this.addToolCallEvent(toolCallsContainer, `🔄 Итерация ${event.iteration}/${event.max_iterations}`, 'iteration');
-                                             break;
-                                             
-                                         case 'thinking':
-                                             this.addToolCallEvent(toolCallsContainer, `💭 ${event.message}`, 'thinking');
-                                             break;
-                                             
-                                         case 'tool_call_start':
-                                             currentToolElement = this.createToolCallElement(event.tool_name, event.arguments);
-                                             toolCallsContainer.querySelector('.tool-calls-list').appendChild(currentToolElement);
-                                             break;
-                                             
-                                         case 'tool_call_success':
-                                             if (currentToolElement) {
-                                                 this.updateToolCallStatus(currentToolElement, 'success', event.output);
-                                             }
-                                             break;
-                                             
-                                         case 'tool_call_error':
-                                             if (currentToolElement) {
-                                                 this.updateToolCallStatus(currentToolElement, 'error', event.error);
-                                             }
-                                             break;
-                                             
-                                         case 'content_start':
-                                             // Start streaming content
-                                             this.addToolCallEvent(toolCallsContainer, `💭 ${event.message}`, 'thinking');
-                                             this.currentStreamingContent = '';
-                                             break;
-                                             
-                                         case 'content_chunk':
+                                    const channel = event.channel;
+                                    const content = event.content;
+                                    
+                                    if (channel === 'debug') {
+                                        // Debug information
+                                        console.log('[DEBUG]', content);
+                                        
+                                        // Create assistant message if needed
+                                        if (!this.currentAssistantMessage) {
+                                            this.currentAssistantMessage = this.createAssistantMessage();
+                                        }
+                                        
+                                        // Create debug container if needed
+                                        if (!debugContainer) {
+                                            debugContainer = this.createDebugContainer();
+                                        }
+                                        
+                                        if (debugContainer) {
+                                            this.addDebugMessage(debugContainer, content);
+                                        }
+                                        
+                                    } else if (channel === 'info') {
+                                        // Document information
+                                        console.log('[INFO]', content.substring(0, 100));
+                                        
+                                        if (!this.currentAssistantMessage) {
+                                            this.currentAssistantMessage = this.createAssistantMessage();
+                                        }
+                                        
+                                        // Add to sources section
+                                        this.addDocumentInfo(content);
+                                        
+                                    } else if (channel === 'chat') {
+                                        // Main response content
+                                        if (!this.currentAssistantMessage) {
+                                            this.currentAssistantMessage = this.createAssistantMessage();
+                                        }
+                                        
                                              // Accumulate streaming content
-                                             this.currentStreamingContent += event.chunk;
+                                        this.currentStreamingContent += content;
                                              const streamingDiv = this.currentAssistantMessage.querySelector('.message-text');
+                                        
                                              if (streamingDiv) {
                                                  // Add streaming cursor
                                                  const contentWithCursor = this.currentStreamingContent + '<span class="streaming-cursor">▊</span>';
@@ -1977,13 +1747,30 @@
                                                  
                                                  this.scrollToBottom();
                                              }
-                                             break;
-                                             
-                                         case 'complete':
-                                             console.log('[COMPLETE] Event received:', event);
-                                             console.log('[COMPLETE] Current assistant message:', this.currentAssistantMessage);
-                                             console.log('[COMPLETE] Content length:', event.content?.length);
-                                             console.log('[COMPLETE] Sources count:', event.sources?.length);
+                                        
+                                    } else if (channel === 'highlight') {
+                                        // Evidence highlight data (Kotaemon-style)
+                                        try {
+                                            const highlightData = JSON.parse(content);
+                                            console.log('[HIGHLIGHT]', highlightData);
+                                            
+                                            // Store evidences as array for each document
+                                            if (highlightData.doc_rank && highlightData.evidence) {
+                                                if (!this.citationHighlights[highlightData.doc_rank]) {
+                                                    this.citationHighlights[highlightData.doc_rank] = [];
+                                                }
+                                                this.citationHighlights[highlightData.doc_rank].push(highlightData.evidence);
+                                                
+                                                // Re-render info panel with highlights
+                                                this.renderInfoPanel();
+                                            }
+                                        } catch (e) {
+                                            console.error('Error parsing highlight data:', e);
+                                        }
+                                        
+                                    } else if (channel === 'done') {
+                                        // Streaming complete
+                                        console.log('[DONE] Stream completed');
                                              
                                              // Clear any pending highlight timeouts
                                              if (this.highlightTimeout) {
@@ -1993,37 +1780,22 @@
                                              
                                              // Finalize answer (remove cursor)
                                              const contentDiv = this.currentAssistantMessage?.querySelector('.message-text');
-                                             console.log('[COMPLETE] Content div found:', !!contentDiv);
                                              
                                              if (contentDiv) {
-                                                 const finalContent = event.content || this.currentStreamingContent;
-                                                 console.log('[COMPLETE] Final content length:', finalContent.length);
+                                            const finalContent = this.currentStreamingContent;
                                                  contentDiv.innerHTML = this.parseMarkdown(finalContent);
                                                  this.highlightCodeBlocks(contentDiv);
-                                                 console.log('[COMPLETE] Content rendered');
-                                             } else {
-                                                 console.error('[COMPLETE] Content div not found!');
-                                             }
-                                             
-                                             // Add sources if any
-                                             if (event.sources && event.sources.length > 0) {
-                                                 console.log('[COMPLETE] Rendering sources...');
-                                                 this.renderSources(this.currentAssistantMessage, event.sources);
-                                             }
-                                             
-                                             // Add metadata
-                                             console.log('[COMPLETE] Adding metadata...');
-                                             this.addResponseMetadata(event);
+                                        }
                                              
                                              // Reset streaming content
                                              this.currentStreamingContent = '';
-                                             console.log('[COMPLETE] Processing finished');
-                                             break;
-                                             
-                                         case 'error':
-                                             this.addErrorMessage(event.message);
-                                             break;
-                                     }
+                                        
+                                    } else if (channel === 'error') {
+                                        // Error occurred
+                                        console.error('[ERROR]', content);
+                                        this.addErrorMessage(content);
+                                    }
+                                    
                                  } catch (e) {
                                      console.error('Error parsing event JSON:', e, 'Line:', line);
                                  }
@@ -2033,68 +1805,6 @@
                  } finally {
                      reader.releaseLock();
                  }
-             }
-             
-             createToolCallsContainer() {
-                 const container = document.createElement('div');
-                 container.className = 'tool-calls-container';
-                 container.innerHTML = `
-                     <details class="tool-calls-details" open>
-                         <summary class="tool-calls-summary">
-                             <span class="tool-calls-icon">🔧</span>
-                             <span class="tool-calls-title">Tool Calls Log</span>
-                             <span class="tool-calls-toggle">▼</span>
-                         </summary>
-                         <div class="tool-calls-list"></div>
-                     </details>
-                 `;
-                 return container;
-             }
-             
-             createToolCallElement(toolName, args) {
-                 const element = document.createElement('div');
-                 element.className = 'tool-call-item pending';
-                 
-                 // Безопасное преобразование в строку
-                 const argsStr = args ? JSON.stringify(args, null, 2) : '{}';
-                 const argsPreview = argsStr.substring(0, 100);
-                 
-                 element.innerHTML = `
-                     <div class="tool-call-header">
-                         <span class="tool-call-status">⏳</span>
-                         <span class="tool-call-name">${this.escapeHtml(toolName || 'unknown')}</span>
-                     </div>
-                     <div class="tool-call-args">
-                         <pre><code>${this.escapeHtml(argsPreview)}${argsPreview.length >= 100 ? '...' : ''}</code></pre>
-                     </div>
-                     <div class="tool-call-output" style="display: none;"></div>
-                 `;
-                 
-                 return element;
-             }
-             
-             updateToolCallStatus(element, status, output) {
-                 element.className = `tool-call-item ${status}`;
-                 
-                 const statusIcon = element.querySelector('.tool-call-status');
-                 if (statusIcon) {
-                     statusIcon.textContent = status === 'success' ? '✅' : '❌';
-                 }
-                 
-                 const outputDiv = element.querySelector('.tool-call-output');
-                 if (outputDiv && output) {
-                     outputDiv.style.display = 'block';
-                     // Безопасно обрабатываем output
-                     const outputStr = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
-                     outputDiv.innerHTML = `<pre><code>${this.escapeHtml(outputStr)}</code></pre>`;
-                 }
-             }
-             
-             addToolCallEvent(container, message, type) {
-                 const event = document.createElement('div');
-                 event.className = `tool-call-event ${type}`;
-                 event.textContent = message;
-                 container.querySelector('.tool-calls-list').appendChild(event);
              }
 
              async handleJsonResponse(response) {
@@ -2159,117 +1869,6 @@
             }
 
 
-            handleSearchStreamData(data) {
-                switch (data.type) {
-                    case 'user_message':
-                        console.log('Search query received:', data.content);
-                        break;
-
-                    case 'process_start':
-                        this.addProcessStep('process_start', 'Processing Started', data.content);
-                        break;
-
-                    case 'embedding_generation':
-                        this.addProcessStep('embedding', 'Generating Embedding', data.content);
-                        break;
-
-                    case 'search_start':
-                        this.addProcessStep('search', 'Document Search', data.content);
-                        break;
-
-                    case 'search_params':
-                        this.addProcessStep('search_params', 'Search Parameters', data.content);
-                        break;
-
-                    case 'raw_search_results':
-                        this.addProcessStep('raw_results', 'Search Results', data.content);
-                        break;
-
-                    case 'filtering_start':
-                        this.addProcessStep('filtering', 'Filtering Results', data.content);
-                        break;
-
-                    case 'search_results':
-                        this.addProcessStep('final_results', 'Final Results', data.content);
-                        break;
-
-                    case 'context_building':
-                        this.addProcessStep('context', 'Building Context', data.content);
-                        break;
-
-                    case 'context_ready':
-                        this.addProcessStep('context_ready', 'Context Ready', data.content);
-                        break;
-
-                    case 'documents_info':
-                        this.addProcessStep('documents', 'Document Information', data.content);
-                        break;
-
-                    case 'generation_start':
-                        this.addProcessStep('generation', 'Generating Response', data.content);
-                        break;
-
-                    case 'assistant_content':
-                        if (!this.currentAssistantMessage) {
-                            this.currentAssistantMessage = this.createAssistantMessage();
-                        }
-                        this.appendToAssistantMessage(data.content);
-                        break;
-
-                    case 'thinking':
-                        if (!this.currentReasoning) {
-                            this.currentReasoning = this.createReasoningSection();
-                        }
-                        this.appendToReasoning(data.content);
-                        break;
-
-                    case 'tool_calls_start':
-                        console.log('Tool calls starting');
-                        break;
-
-                    case 'tool_call':
-                        this.addToolCall(data.name, data.args);
-                        break;
-
-                    case 'tool_output':
-                        this.updateToolCall(data.name, data.output);
-                        break;
-
-                    case 'tool_error':
-                        this.updateToolCall(data.name, `Error: ${data.error}`, true);
-                        break;
-
-                    case 'final_response_start':
-                        console.log('Final response starting');
-                        break;
-
-                    case 'final_content':
-                        if (!this.currentAssistantMessage) {
-                            this.currentAssistantMessage = this.createAssistantMessage();
-                        }
-                        this.appendToAssistantMessage(data.content);
-                        break;
-
-                    case 'final_thinking':
-                        if (!this.currentReasoning) {
-                            this.currentReasoning = this.createReasoningSection();
-                        }
-                        this.appendToReasoning(data.content);
-                        break;
-
-                    case 'metadata':
-                        console.log('Search metadata:', data.content);
-                        break;
-
-                    case 'complete':
-                        this.finalizeMessage();
-                        break;
-
-                    case 'error':
-                        this.addErrorMessage(`Search error: ${data.content}`);
-                        break;
-                }
-            }
 
             addUserMessage(content) {
                 const messageGroup = document.createElement('div');
@@ -2305,47 +1904,92 @@
                 this.scrollToBottom();
             }
 
+            restoreInfoPanelFromMetadata(metadata) {
+                // Restore Information Panel from metadata
+                if (!metadata || !metadata.retrieved_docs) {
+                    console.log('[RESTORE] No metadata or retrieved_docs found');
+                    return;
+                }
+                
+                console.log('[RESTORE] Restoring Information Panel with', metadata.retrieved_docs.length, 'docs');
+                
+                // Clear previous data
+                this.retrievedDocs = [];
+                this.citationHighlights = {};
+                
+                // Restore retrieved docs
+                for (const docData of metadata.retrieved_docs) {
+                    const doc = {
+                        rank: docData.rank,
+                        content: docData.content,
+                        finalScore: docData.score || 0,
+                        semanticScore: docData.semantic_score || 0,
+                        keywordScore: docData.keyword_score || 0,
+                        llmScore: docData.llm_score,
+                        docId: docData.doc_id
+                    };
+                    
+                    // Extract source and page from metadata
+                    if (docData.metadata) {
+                        doc.source = docData.metadata.file_name || 'Unknown';
+                        doc.page = docData.metadata.page_label || 'N/A';
+                    }
+                    
+                    this.retrievedDocs.push(doc);
+                }
+                
+                // Restore evidences (citation highlights)
+                if (metadata.evidences) {
+                    for (const [docRank, evidenceData] of Object.entries(metadata.evidences)) {
+                        if (evidenceData.evidences) {
+                            this.citationHighlights[parseInt(docRank)] = evidenceData.evidences;
+                        }
+                    }
+                    console.log('[RESTORE] Restored evidences for', Object.keys(this.citationHighlights).length, 'docs');
+                }
+                
+                // Render Information Panel
+                this.renderInfoPanel();
+            }
+
             restoreAssistantMessage(content, metadata) {
                 console.log('[RESTORE] Restoring message with metadata:', metadata);
                 
-                // Создаем базовое сообщение
+                // Create base message
                 const messageGroup = this.createAssistantMessage();
                 
-                // Если есть metadata с tool calls, восстанавливаем их
-                if (metadata && metadata.tool_calls && metadata.tool_calls.length > 0) {
-                    console.log('[RESTORE] Restoring', metadata.tool_calls.length, 'tool calls');
-                    const toolCallsContainer = this.createToolCallsContainer();
-                    const messageContent = messageGroup.querySelector('.message-content');
-                    messageContent.insertBefore(toolCallsContainer, messageContent.firstChild);
-                    
-                    // Восстанавливаем каждый tool call
-                    for (const toolCall of metadata.tool_calls) {
-                        console.log('[RESTORE] Tool call:', toolCall);
-                        const toolElement = this.createToolCallElement(toolCall.name, toolCall.arguments);
-                        if (toolCall.success) {
-                            this.updateToolCallStatus(toolElement, 'success', toolCall.result || 'Success');
-                        } else if (toolCall.error) {
-                            this.updateToolCallStatus(toolElement, 'error', toolCall.error);
-                        }
-                        toolCallsContainer.querySelector('.tool-calls-list').appendChild(toolElement);
-                    }
-                } else {
-                    console.log('[RESTORE] No tool calls in metadata');
+                // Store metadata as data attribute for later access
+                if (metadata) {
+                    messageGroup.dataset.metadata = JSON.stringify(metadata);
                 }
                 
-                // Добавляем основной контент
+                // Add click handler to restore Information Panel
+                messageGroup.style.cursor = 'pointer';
+                messageGroup.title = 'Click to view retrieved documents';
+                messageGroup.addEventListener('click', () => {
+                    console.log('[CLICK] Message clicked, restoring Information Panel');
+                    if (metadata) {
+                        this.restoreInfoPanelFromMetadata(metadata);
+                        
+                        // Open panel if closed
+                        if (this.infoPanel.classList.contains('collapsed')) {
+                            this.toggleInfoPanel();
+                        }
+                    }
+                });
+                
+                // Add main content
                 const textDiv = messageGroup.querySelector('.message-text');
                 if (textDiv) {
-                    textDiv.innerHTML = this.parseMarkdown(content);
+                    // Make inline citations clickable
+                    const htmlContent = this.makeInlineCitationsClickable(this.parseMarkdown(content));
+                    textDiv.innerHTML = htmlContent;
                     this.highlightCodeBlocks(textDiv);
                 }
                 
-                // Если есть sources, добавляем их
-                if (metadata && metadata.sources && metadata.sources.length > 0) {
-                    console.log('[RESTORE] Restoring', metadata.sources.length, 'sources');
-                    this.renderSources(messageGroup, metadata.sources);
-                } else {
-                    console.log('[RESTORE] No sources in metadata');
+                // Restore Information Panel data if available (for most recent message)
+                if (metadata && metadata.retrieved_docs) {
+                    this.restoreInfoPanelFromMetadata(metadata);
                 }
                 
                 this.scrollToBottom();
@@ -2360,9 +2004,6 @@
                         <div class="message-avatar assistant">🤖</div>
                         <div class="message-content">
                             <div class="message-text streaming-text"></div>
-                            <div class="ai-actions" id="ai-actions-${Date.now()}" style="display: none;">
-                                <!-- Значки действий будут добавлены динамически -->
-                            </div>
                         </div>
                     </div>
                 `;
@@ -2462,268 +2103,6 @@
                  }
              }
 
-             addResponseMetadata(data) {
-                 const aiActions = this.currentAssistantMessage.querySelector('.ai-actions');
-                 if (!aiActions) return;
-
-                 // Show actions panel
-                 aiActions.style.display = 'flex';
-
-                 // Format model name
-                 const modelName = data.model_used || 'N/A';
-                 const modelEmoji = modelName.includes('gpt-4o-mini') ? '🚀' : 
-                                  modelName.includes('gpt-4o') ? '⭐' : 
-                                  modelName.includes('gpt-3.5') ? '💰' : '🤖';
-
-                 // Add metadata badge
-                 const metadataBadge = document.createElement('div');
-                 metadataBadge.className = 'action-badge process';
-                 metadataBadge.innerHTML = `
-                     <span class="action-icon">${modelEmoji}</span>
-                     <span>${modelName} | ${data.processing_time || 0}s</span>
-                 `;
-                 aiActions.appendChild(metadataBadge);
-             }
-
-             addToolCallsInfo(toolCalls) {
-                 console.log('Adding tool calls info:', toolCalls);
-                 const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                 
-                 // Add tool calls badge
-                 const aiActions = messageContent.querySelector('.ai-actions');
-                 if (aiActions) {
-                     const toolBadge = document.createElement('div');
-                     toolBadge.className = 'action-badge tools';
-                     toolBadge.setAttribute('data-target', 'tools');
-                     toolBadge.innerHTML = `
-                         <span class="action-icon">🔧</span>
-                         <span>Tools (${toolCalls.length})</span>
-                     `;
-                     
-                     // Add click handler
-                     toolBadge.addEventListener('click', () => {
-                         console.log('Tool badge clicked');
-                         this.toggleActionDetails('tools');
-                     });
-                     
-                     aiActions.appendChild(toolBadge);
-                     console.log('Tool badge added');
-                 }
-
-                 // Create tool calls section
-                 const toolSection = document.createElement('div');
-                 toolSection.className = 'tool-call-section';
-                 toolSection.style.display = 'none';
-                 toolSection.id = 'tools-section';
-                 
-                 let toolHtml = '<div class="tool-call-header"><span>🔧 Tools Used</span></div><div class="tool-call-content">';
-                 
-                 toolCalls.forEach((tool, index) => {
-                     const status = tool.success ? '✅' : '❌';
-                     const statusText = tool.success ? 'Success' : 'Error';
-                     
-                     toolHtml += `
-                         <div class="tool-call-item">
-                             <div class="tool-call-name">${status} ${tool.name}</div>
-                             <div class="tool-call-args">
-                                 <strong>Arguments:</strong><br>
-                                 <pre>${JSON.stringify(tool.arguments, null, 2)}</pre>
-                             </div>
-                             ${tool.output ? `
-                                 <div class="tool-call-output">
-                                     <strong>Result:</strong><br>
-                                     <pre>${this.escapeHtml(tool.output.substring(0, 500))}${tool.output.length > 500 ? '...' : ''}</pre>
-                                 </div>
-                             ` : ''}
-                             ${tool.error ? `
-                                 <div class="tool-call-output" style="color: #dc2626;">
-                                     <strong>Error:</strong> ${this.escapeHtml(tool.error)}
-                                 </div>
-                             ` : ''}
-                             <div style="font-size: 11px; color: #666; margin-top: 4px;">
-                                 Status: ${statusText}
-                             </div>
-                         </div>
-                     `;
-                 });
-                 
-                 toolHtml += '</div>';
-                 toolSection.innerHTML = toolHtml;
-                 messageContent.appendChild(toolSection);
-                 console.log('Tool section created and added');
-             }
-
-             renderSources(messageGroup, sources) {
-                 console.log('[RENDER_SOURCES] Rendering sources for message group');
-                 // Если передан messageGroup, используем его, иначе currentAssistantMessage
-                 const targetMessage = messageGroup || this.currentAssistantMessage;
-                 if (!targetMessage) {
-                     console.error('[RENDER_SOURCES] No message group found!');
-                     return;
-                 }
-                 this.addSourcesInfo(sources, targetMessage);
-             }
-
-             addSourcesInfo(sources, messageElement = null) {
-                console.log('Adding sources info:', sources);
-                const targetMessage = messageElement || this.currentAssistantMessage;
-                if (!targetMessage) {
-                    console.error('[ADD_SOURCES] No target message element!');
-                    return;
-                }
-                const messageContent = targetMessage.querySelector('.message-content');
-                
-                // Add sources badge
-                const aiActions = messageContent.querySelector('.ai-actions');
-                if (aiActions) {
-                    const sourcesBadge = document.createElement('div');
-                    sourcesBadge.className = 'action-badge completed';
-                    sourcesBadge.setAttribute('data-target', 'sources');
-                    sourcesBadge.innerHTML = `
-                        <span class="action-icon">📚</span>
-                        <span>Источники (${sources.length})</span>
-                    `;
-                    
-                    // Add click handler
-                    sourcesBadge.addEventListener('click', () => {
-                        console.log('Sources badge clicked');
-                        this.toggleActionDetails('sources');
-                    });
-                    
-                    aiActions.appendChild(sourcesBadge);
-                    console.log('Sources badge added');
-                }
-
-                // Create sources section with expandable content
-                const sourcesSection = document.createElement('div');
-                sourcesSection.className = 'collapsible-section sources-section';
-                sourcesSection.style.display = 'none';
-                sourcesSection.id = 'sources-section';
-                
-                let sourcesHtml = `
-                    <div class="section-header">
-                        <div class="section-title">
-                            <span class="section-icon">📚</span>
-                            <span>Найденные источники (${sources.length})</span>
-                        </div>
-                        <span class="section-arrow">▼</span>
-                    </div>
-                    <div class="section-content">
-                `;
-                
-                sources.forEach((source, index) => {
-                    const fullContent = source.content || '';
-                    const preview = fullContent.substring(0, 200);
-                    const sourceId = `source-${Date.now()}-${index}`;
-                    
-                    sourcesHtml += `
-                        <div class="source-item">
-                            <div class="source-header">
-                                <div class="source-title">
-                                    <span class="file-icon">📄</span>
-                                    <strong>${this.escapeHtml(source.filename)}</strong>
-                                </div>
-                                <div class="source-meta">
-                                    <span class="similarity-badge">${(source.similarity * 100).toFixed(1)}% совпадение</span>
-                                    <span class="chunk-badge">Фрагмент ${source.chunk_index + 1}</span>
-                                </div>
-                            </div>
-                            <div class="source-content-wrapper">
-                                <div class="source-content" id="${sourceId}">
-                                    <pre class="source-text">${this.escapeHtml(preview)}${fullContent.length > 200 ? '...' : ''}</pre>
-                                </div>
-                                ${fullContent.length > 200 ? `
-                                    <button class="expand-button" onclick="window.chatApp.toggleSourceExpand('${sourceId}', ${index})">
-                                        <span class="expand-text">Показать полностью</span>
-                                        <span class="expand-icon">▼</span>
-                                    </button>
-                                ` : ''}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                sourcesHtml += '</div></div>';
-                sourcesSection.innerHTML = sourcesHtml;
-                
-                // Store full content for expand functionality
-                if (!this.sourcesFullContent) {
-                    this.sourcesFullContent = {};
-                }
-                sources.forEach((source, index) => {
-                    this.sourcesFullContent[index] = source.content || '';
-                });
-                
-                messageContent.appendChild(sourcesSection);
-                console.log('Sources section created and added');
-            }
-            
-            toggleSourceExpand(sourceId, sourceIndex) {
-                const sourceElement = document.getElementById(sourceId);
-                const button = sourceElement.nextElementSibling;
-                const textElement = sourceElement.querySelector('.source-text');
-                
-                if (sourceElement.classList.contains('expanded')) {
-                    // Collapse
-                    const fullContent = this.sourcesFullContent[sourceIndex] || '';
-                    const preview = fullContent.substring(0, 200);
-                    textElement.textContent = preview + (fullContent.length > 200 ? '...' : '');
-                    sourceElement.classList.remove('expanded');
-                    button.querySelector('.expand-text').textContent = 'Показать полностью';
-                    button.querySelector('.expand-icon').textContent = '▼';
-                } else {
-                    // Expand
-                    const fullContent = this.sourcesFullContent[sourceIndex] || '';
-                    textElement.textContent = fullContent;
-                    sourceElement.classList.add('expanded');
-                    button.querySelector('.expand-text').textContent = 'Скрыть';
-                    button.querySelector('.expand-icon').textContent = '▲';
-                }
-            }
-
-             addReasoningInfo(reasoning) {
-                 const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                 
-                 // Add reasoning badge
-                 const aiActions = messageContent.querySelector('.ai-actions');
-                 if (aiActions) {
-                     const reasoningBadge = document.createElement('div');
-                     reasoningBadge.className = 'action-badge reasoning';
-                     reasoningBadge.setAttribute('data-target', 'thinking');
-                     reasoningBadge.innerHTML = `
-                         <span class="action-icon">🤔</span>
-                         <span>Размышления</span>
-                     `;
-                     
-                     // Add click handler
-                     reasoningBadge.addEventListener('click', () => {
-                         this.toggleActionDetails('thinking');
-                     });
-                     
-                     aiActions.appendChild(reasoningBadge);
-                 }
-
-                 // Create reasoning section with better styling
-                 const reasoningSection = document.createElement('div');
-                 reasoningSection.className = 'collapsible-section reasoning-section';
-                 reasoningSection.style.display = 'none';
-                 reasoningSection.id = 'reasoning-section';
-                 
-                 reasoningSection.innerHTML = `
-                     <div class="section-header">
-                         <div class="section-title">
-                             <span class="section-icon">🤔</span>
-                             <span>Размышления AI</span>
-                         </div>
-                         <span class="section-arrow">▼</span>
-                     </div>
-                     <div class="section-content">
-                         <div class="reasoning-text">${this.escapeHtml(reasoning)}</div>
-                     </div>
-                 `;
-                 
-                 messageContent.appendChild(reasoningSection);
-             }
 
             renderStreamingContent() {
                 if (this.currentAssistantMessage && this.currentStreamingContent) {
@@ -2734,103 +2113,6 @@
                 }
             }
 
-            createReasoningSection() {
-                if (!this.currentAssistantMessage) return null;
-                
-                // Добавляем значок "Размышлял"
-                this.addActionBadge('reasoning', '🤔', 'Размышлял', 'thinking');
-                
-                // Создаем скрытую секцию для размышлений с новым стилем
-                const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                const reasoningSection = document.createElement('div');
-                reasoningSection.className = 'collapsible-section reasoning-section';
-                reasoningSection.id = 'reasoning-section';
-                reasoningSection.style.display = 'none';
-                
-                reasoningSection.innerHTML = `
-                    <div class="section-header">
-                        <div class="section-title">
-                            <span class="section-icon">🤔</span>
-                            <span>Размышления AI</span>
-                        </div>
-                        <span class="section-arrow">▼</span>
-                    </div>
-                    <div class="section-content">
-                        <div class="reasoning-text streaming-text"></div>
-                    </div>
-                `;
-                
-                messageContent.appendChild(reasoningSection);
-                this.scrollToBottom();
-                
-                return reasoningSection.querySelector('.reasoning-text');
-            }
-
-            appendToReasoning(content) {
-                if (this.currentReasoning) {
-                    // For reasoning, we'll also accumulate and re-render
-                    this.currentReasoningContent = (this.currentReasoningContent || '') + content;
-                    const html = this.parseMarkdown(this.currentReasoningContent);
-                    this.currentReasoning.innerHTML = html;
-                    this.highlightCodeBlocks(this.currentReasoning);
-                    this.addStreamingCursor();
-                    this.scrollToBottom();
-                }
-            }
-
-            addToolCall(name, args) {
-                if (!this.currentAssistantMessage) return;
-                
-                // Add "Used tools" badge
-                this.addActionBadge('tools', '🔧', 'Used Tools', 'tools');
-                
-                // Create hidden section for tool details
-                const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                const toolCallSection = document.createElement('div');
-                toolCallSection.className = 'tool-call-section';
-                toolCallSection.id = `tool-${name}-${Date.now()}`;
-                toolCallSection.style.display = 'none';
-                
-                toolCallSection.innerHTML = `
-                    <div class="tool-call-header">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span>🔧</span>
-                            <span>Tool Call: ${name}</span>
-                            <span class="tool-status" style="font-size: 11px; color: #007bff;">(running...)</span>
-                        </div>
-                    </div>
-                    <div class="tool-call-content">
-                        <div><strong>Arguments:</strong></div>
-                        <div style="background: #f5f5f5; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px;">
-                            ${this.escapeHtml(JSON.stringify(args, null, 2))}
-                        </div>
-                        <div><strong>Result:</strong> <span class="tool-result">Running...</span></div>
-                    </div>
-                `;
-                
-                messageContent.appendChild(toolCallSection);
-                this.scrollToBottom();
-            }
-
-            updateToolCall(name, output, isError = false) {
-                const toolSections = document.querySelectorAll('.tool-call-section');
-                const lastToolSection = toolSections[toolSections.length - 1];
-                
-                if (lastToolSection) {
-                    const resultSpan = lastToolSection.querySelector('.tool-result');
-                    const statusSpan = lastToolSection.querySelector('.tool-status');
-                    
-                    if (resultSpan) {
-                        resultSpan.textContent = isError ? `Error: ${output}` : output;
-                        resultSpan.style.color = isError ? '#dc2626' : '#1565c0';
-                    }
-                    
-                    if (statusSpan) {
-                        statusSpan.textContent = isError ? '(error)' : '(completed)';
-                        statusSpan.style.color = isError ? '#dc2626' : '#28a745';
-                    }
-                }
-            }
 
             addErrorMessage(content) {
                 const messageGroup = document.createElement('div');
@@ -2900,11 +2182,24 @@
                 }
                 
                 try {
-                    return marked.parse(content);
+                    let html = marked.parse(content);
+                    
+                    // Конвертируем inline citations [1], [2] в кликабельные ссылки
+                    html = this.makeInlineCitationsClickable(html);
+                    
+                    return html;
                 } catch (error) {
                     console.error('Markdown parsing error:', error);
                     return this.simpleFormat(content);
                 }
+            }
+            
+            makeInlineCitationsClickable(html) {
+                // Ищем [1], [2], [3] и т.д. и заменяем на кликабельные ссылки
+                // Используем regex для поиска [число]
+                return html.replace(/\[(\d+)\]/g, (match, number) => {
+                    return `<a href="#" class="citation-link" onclick="window.chatApp.scrollToCitation(${number}); return false;" title="Jump to source ${number}">[${number}]</a>`;
+                });
             }
             
             isHTML(content) {
@@ -3041,118 +2336,6 @@
                 });
             }
 
-            addProcessStep(stepType, stepName, content) {
-                if (!this.currentAssistantMessage) return;
-                
-                // Создаем панель процесса, если её еще нет
-                let processPanel = this.currentAssistantMessage.querySelector('.message-content').querySelector('.ai-process-panel');
-                if (!processPanel) {
-                    processPanel = this.createProcessPanel();
-                }
-                
-                // Добавляем шаг процесса
-                const stepElement = document.createElement('div');
-                stepElement.className = 'process-step';
-                stepElement.setAttribute('data-step', stepType);
-                stepElement.innerHTML = `
-                    <div class="step-header">
-                        <span class="step-icon">⚙️</span>
-                        <span class="step-name">${stepName}</span>
-                        <span class="step-status">✓</span>
-                    </div>
-                    <div class="step-content">${this.escapeHtml(content)}</div>
-                `;
-                
-                processPanel.querySelector('.process-content').appendChild(stepElement);
-                this.scrollToBottom();
-            }
-
-            createProcessPanel() {
-                if (!this.currentAssistantMessage) return null;
-                
-                // Добавляем значок "Процесс генерации"
-                this.addActionBadge('process', '⚙️', 'Процесс генерации', 'process');
-                
-                // Создаем скрытую панель для процесса
-                const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                const processPanel = document.createElement('div');
-                processPanel.className = 'ai-process-panel';
-                processPanel.id = 'process-panel';
-                processPanel.style.display = 'none';
-                
-                processPanel.innerHTML = `
-                    <div class="process-header">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span>⚙️</span>
-                            <span>Процесс генерации ответа</span>
-                        </div>
-                    </div>
-                    <div class="process-content"></div>
-                `;
-                
-                messageContent.appendChild(processPanel);
-                this.scrollToBottom();
-                
-                return processPanel;
-            }
-
-            addActionBadge(type, icon, text, targetId) {
-                if (!this.currentAssistantMessage) return;
-                
-                const aiActions = this.currentAssistantMessage.querySelector('.message-content').querySelector('.ai-actions');
-                if (!aiActions) return;
-                
-                // Показываем панель действий
-                aiActions.style.display = 'flex';
-                
-                // Проверяем, не добавлен ли уже такой значок
-                const existingBadge = aiActions.querySelector(`[data-type="${type}"]`);
-                if (existingBadge) return;
-                
-                const badge = document.createElement('div');
-                badge.className = `action-badge ${type}`;
-                badge.setAttribute('data-type', type);
-                badge.setAttribute('data-target', targetId);
-                badge.innerHTML = `
-                    <span class="action-icon">${icon}</span>
-                    <span>${text}</span>
-                `;
-                
-                badge.addEventListener('click', () => {
-                    this.toggleActionDetails(targetId);
-                });
-                
-                aiActions.appendChild(badge);
-            }
-
-            toggleActionDetails(targetId) {
-                let targetElement;
-                
-                if (targetId === 'thinking') {
-                    targetElement = document.getElementById('reasoning-section');
-                } else if (targetId === 'tools') {
-                    targetElement = document.getElementById('tools-section');
-                } else if (targetId === 'sources') {
-                    targetElement = document.getElementById('sources-section');
-                } else if (targetId === 'process') {
-                    targetElement = document.getElementById('process-panel');
-                }
-                
-                if (targetElement) {
-                    console.log('Toggling element:', targetElement, 'Current display:', targetElement.style.display);
-                    if (targetElement.style.display === 'none' || targetElement.style.display === '') {
-                        targetElement.style.display = 'block';
-                        targetElement.classList.add('show');
-                        console.log('Showing element');
-                    } else {
-                        targetElement.style.display = 'none';
-                        targetElement.classList.remove('show');
-                        console.log('Hiding element');
-                    }
-                } else {
-                    console.log('Target element not found for:', targetId);
-                }
-            }
 
             setStreaming(streaming) {
                 this.isStreaming = streaming;
@@ -3173,13 +2356,14 @@
              async testConnection() {
                  console.log('Testing connection...');
                  try {
-                     const response = await fetch('/chat/generate-openai?chat_id=test-123&model=gpt-4o-mini&stream=false', {
+                     const response = await fetch('/chat/generate?chat_id=test-123', {
                          method: 'POST',
                          headers: {
                              'Content-Type': 'application/json',
                          },
                          body: JSON.stringify({
-                             message: 'test'
+                             message: 'test',
+                             stream: false
                          })
                      });
                      
@@ -3227,15 +2411,16 @@
 
             async loadChats() {
                 try {
-                    console.log('[LOAD] Fetching chats from /chats/');
-                    const response = await fetch('/chats/', {
+                    console.log('[LOAD] Fetching chats from /chat/chats');
+                    const response = await fetch('/chat/chats', {
                         credentials: 'include'
                     });
                     console.log('[LOAD] Response status:', response.status);
                     
                     if (!response.ok) throw new Error('Failed to load chats');
                     
-                    this.chats = await response.json();
+                    const data = await response.json();
+                    this.chats = data.chats || [];
                     console.log('[LOAD] Received chats:', this.chats);
                     
                     this.renderChats();
@@ -3246,16 +2431,16 @@
 
             async createNewChat() {
                 try {
-                    const response = await fetch('/chats/', {
+                    const response = await fetch('/chat/chats?title=New Chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({ title: 'New Chat' })
+                        credentials: 'include'
                     });
                     
                     if (!response.ok) throw new Error('Failed to create chat');
                     
-                    const newChat = await response.json();
+                    const result = await response.json();
+                    const newChat = result.chat;
                     console.log('Created new chat:', newChat);
                     
                     this.chats.unshift(newChat);
@@ -3291,7 +2476,7 @@
                 
                 try {
                     // Загружаем сообщения чата
-                    const response = await fetch(`/chats/${chatId}`, {
+                    const response = await fetch(`/chat/chats/${chatId}`, {
                         credentials: 'include'
                     });
                     if (!response.ok) throw new Error('Failed to load chat');
@@ -3341,7 +2526,7 @@
                 if (!confirm('Delete this chat?')) return;
                 
                 try {
-                    const response = await fetch(`/chats/${chatId}`, {
+                    const response = await fetch(`/chat/chats/${chatId}`, {
                         method: 'DELETE',
                         credentials: 'include'
                     });
@@ -3431,7 +2616,7 @@
             // Обновление чата после получения названия
             async refreshChatTitle(chatId) {
                 try {
-                    const response = await fetch(`/chats/${chatId}`);
+                    const response = await fetch(`/chat/chats/${chatId}`);
                     if (!response.ok) return;
                     
                     const chat = await response.json();
@@ -3445,36 +2630,490 @@
                 }
             }
 
-        }
-
-
-        // Функция для переключения размышлений
-        function toggleReasoning(header) {
-            const content = header.nextElementSibling;
-            const toggle = header.querySelector('.reasoning-toggle');
-            
-            if (content.classList.contains('expanded')) {
-                content.classList.remove('expanded');
-                toggle.classList.remove('expanded');
-            } else {
-                content.classList.add('expanded');
-                toggle.classList.add('expanded');
+            // Helper methods for new event handling
+            createDebugContainer() {
+                if (!this.currentAssistantMessage) return null;
+                
+                const messageContent = this.currentAssistantMessage.querySelector('.message-content');
+                const debugSection = document.createElement('div');
+                debugSection.className = 'collapsible-section debug-section';
+                debugSection.style.marginBottom = '12px';
+                
+                debugSection.innerHTML = `
+                    <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <div class="section-title">
+                            <span class="section-icon">🔍</span>
+                            <span>Debug Information</span>
+                        </div>
+                        <span class="section-arrow">▼</span>
+                    </div>
+                    <div class="section-content">
+                        <div class="debug-messages"></div>
+                    </div>
+                `;
+                
+                messageContent.insertBefore(debugSection, messageContent.firstChild);
+                return debugSection;
             }
+            
+            addDebugMessage(container, message) {
+                const messagesDiv = container.querySelector('.debug-messages');
+                if (!messagesDiv) return;
+                
+                const msgElement = document.createElement('div');
+                msgElement.style.cssText = 'padding: 6px 12px; font-size: 13px; color: #666; border-bottom: 1px solid #eee;';
+                msgElement.textContent = message;
+                messagesDiv.appendChild(msgElement);
+            }
+            
+            addDocumentInfo(content) {
+                // Parse document info from markdown content
+                // Expected format: **Document X**\n- **Final Score**: ...
+                try {
+                    const docInfo = this.parseDocumentInfo(content);
+                    if (docInfo) {
+                        this.retrievedDocs.push(docInfo);
+                        this.renderInfoPanel();
+                    }
+                } catch (e) {
+                    console.error('Error parsing document info:', e);
+                }
+            }
+            
+            parseDocumentInfo(content) {
+                // Parse markdown content to extract document info
+                const lines = content.split('\n');
+                const doc = {};
+                
+                // Extract rank from "**Document X**"
+                const rankMatch = content.match(/\*\*Document (\d+)\*\*/);
+                if (rankMatch) {
+                    doc.rank = parseInt(rankMatch[1]);
+                }
+                
+                // Extract scores
+                const scoreMatch = content.match(/\*\*Final Score\*\*: ([\d.]+)/);
+                if (scoreMatch) {
+                    doc.finalScore = parseFloat(scoreMatch[1]);
+                }
+                
+                const semanticMatch = content.match(/Semantic: ([\d.]+)/);
+                if (semanticMatch) {
+                    doc.semanticScore = parseFloat(semanticMatch[1]);
+                }
+                
+                const keywordMatch = content.match(/Keyword: ([\d.]+)/);
+                if (keywordMatch) {
+                    doc.keywordScore = parseFloat(keywordMatch[1]);
+                }
+                
+                // Extract LLM Relevance score
+                const llmMatch = content.match(/🤖 LLM Relevance\*\*: ([\d.]+)\/10/);
+                if (llmMatch) {
+                    doc.llmScore = parseFloat(llmMatch[1]);
+                }
+                
+                // Extract source metadata
+                const sourceMatch = content.match(/\*\*Source\*\*: ([^,]+), Page: (.+)/);
+                if (sourceMatch) {
+                    doc.source = sourceMatch[1].trim();
+                    doc.page = sourceMatch[2].trim();
+                }
+                
+                // Extract content from code block
+                const codeBlockMatch = content.match(/```\n([\s\S]+?)\n```/);
+                if (codeBlockMatch) {
+                    doc.content = codeBlockMatch[1].trim();
+                }
+                
+                return doc;
+            }
+            
+            toggleInfoPanel() {
+                this.infoPanel.classList.toggle('collapsed');
+            }
+            
+            clearInfoPanel() {
+                this.retrievedDocs = [];
+                this.citationHighlights = {}; // Clear citation highlights
+                this.infoPanelContent.innerHTML = `
+                    <div class="info-panel-empty">
+                        <div class="empty-icon">🔍</div>
+                        <div class="empty-text">No documents retrieved yet</div>
+                        <div class="empty-hint">Send a message to see retrieved documents</div>
+                    </div>
+                `;
+            }
+            
+            renderInfoPanel() {
+                if (this.retrievedDocs.length === 0) {
+                    this.clearInfoPanel();
+                    return;
+                }
+                
+                // Разделяем на with_citation и without_citation (Kotaemon-style)
+                const withCitation = [];
+                const withoutCitation = [];
+                
+                for (const doc of this.retrievedDocs) {
+                    const hasEvidence = this.citationHighlights[doc.rank] && this.citationHighlights[doc.rank].length > 0;
+                    if (hasEvidence) {
+                        withCitation.push(doc);
+            } else {
+                        withoutCitation.push(doc);
+                    }
+                }
+                
+                // Сортируем without_citation по LLM score (descending)
+                withoutCitation.sort((a, b) => (b.llmScore || 0) - (a.llmScore || 0));
+                
+                let html = '';
+                
+                // Сначала документы с цитатами (автоматически раскрыты)
+                if (withCitation.length > 0) {
+                    html += '<div class="docs-section with-citation">';
+                    html += '<div class="section-header">📌 Documents with Citations</div>';
+                    for (const doc of withCitation) {
+                        html += this.createDocCard(doc, true);  // true = открыт
+                    }
+                    html += '</div>';
+                }
+                
+                // Затем документы без цитат (закрыты по умолчанию)
+                if (withoutCitation.length > 0) {
+                    html += '<div class="docs-section without-citation">';
+                    html += '<div class="section-header">📄 Other Retrieved Documents</div>';
+                    for (const doc of withoutCitation) {
+                        html += this.createDocCard(doc, false);  // false = закрыт
+                    }
+                    html += '</div>';
+                }
+                
+                this.infoPanelContent.innerHTML = html;
+            }
+            
+            createDocCard(doc, isOpen = false) {
+                const hasHybridScores = doc.semanticScore !== undefined && doc.keywordScore !== undefined;
+                const hasEvidences = this.citationHighlights[doc.rank] && this.citationHighlights[doc.rank].length > 0;
+                
+                return `
+                    <div class="doc-card ${isOpen ? 'open' : 'collapsed'}" data-doc-rank="${doc.rank || '?'}">
+                        <div class="doc-card-header" onclick="window.chatApp.toggleDocCard(${doc.rank})">
+                            <div class="doc-header-top">
+                                <div class="doc-rank">${hasEvidences ? '📌' : '📄'} #${doc.rank || '?'}</div>
+                                <button class="doc-expand-btn" id="expand-btn-${doc.rank}">
+                                    ${isOpen ? '▼' : '▶'}
+                                </button>
+                            </div>
+                            <div class="doc-scores">
+                                ${hasHybridScores ? `
+                                    <div class="doc-score-bar">
+                                        <span class="score-label">Semantic</span>
+                                        <div class="score-progress">
+                                            <div class="score-progress-fill semantic" style="width: ${(doc.semanticScore * 100).toFixed(1)}%"></div>
+                                        </div>
+                                        <span class="score-value">${doc.semanticScore.toFixed(3)}</span>
+                                    </div>
+                                    <div class="doc-score-bar">
+                                        <span class="score-label">Keyword</span>
+                                        <div class="score-progress">
+                                            <div class="score-progress-fill keyword" style="width: ${(doc.keywordScore * 100).toFixed(1)}%"></div>
+                                        </div>
+                                        <span class="score-value">${doc.keywordScore.toFixed(3)}</span>
+                                    </div>
+                                ` : ''}
+                                ${doc.llmScore !== undefined ? `
+                                    <div class="doc-score-bar">
+                                        <span class="score-label">🤖 LLM</span>
+                                        <div class="score-progress">
+                                            <div class="score-progress-fill llm" style="width: ${(doc.llmScore * 10).toFixed(1)}%"></div>
+                                        </div>
+                                        <span class="score-value">${doc.llmScore.toFixed(1)}/10</span>
+                                    </div>
+                                ` : ''}
+                                <div class="doc-score-bar">
+                                    <span class="score-label">Final</span>
+                                    <div class="score-progress">
+                                        <div class="score-progress-fill final" style="width: ${((doc.finalScore || 0) * 100).toFixed(1)}%"></div>
+                                    </div>
+                                    <span class="score-value">${(doc.finalScore || 0).toFixed(3)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        
+                        <div class="doc-body" id="doc-body-${doc.rank}" style="display: ${isOpen ? 'block' : 'none'}">
+                            ${doc.source || doc.page ? `
+                                <div class="doc-metadata">
+                                    ${doc.source ? `
+                                        <div class="metadata-row">
+                                            <span class="metadata-label">📄 File:</span>
+                                            <span class="metadata-value">${this.escapeHtml(doc.source)}</span>
+                                        </div>
+                                    ` : ''}
+                                    ${doc.page ? `
+                                        <div class="metadata-row">
+                                            <span class="metadata-label">📖 Page:</span>
+                                            <span class="metadata-value">${this.escapeHtml(doc.page)}</span>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                            
+                            ${doc.content ? `
+                                <div class="doc-content-wrapper">
+                                    <div class="doc-content">
+                                        ${this.highlightEvidences(doc.content, doc.rank)}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            highlightEvidences(content, docRank) {
+                // Check if there are evidences for this document (Kotaemon-style)
+                const evidences = this.citationHighlights[docRank];
+                
+                if (!evidences || evidences.length === 0) {
+                    return this.escapeHtml(content);
+                }
+                
+                console.log(`[HIGHLIGHT] Highlighting ${evidences.length} evidences in doc ${docRank}`);
+                console.log(`[HIGHLIGHT] Content length: ${content.length}`);
+                console.log(`[HIGHLIGHT] Content preview: "${content.substring(0, 200)}..."`);
+                
+                // Create regex patterns for each evidence (case-insensitive, flexible whitespace and punctuation)
+                const patterns = [];
+                
+                for (const evidence of evidences) {
+                    console.log(`[HIGHLIGHT] Processing evidence: "${evidence}"`);
+                    
+                    // Escape special regex characters except spaces and punctuation
+                    let pattern = evidence
+                        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')  // Escape regex special chars
+                        .replace(/[.,;:!?'"()[\]{}]/g, '[.,;:!?\'"()\\[\\]{}]*')  // Allow optional punctuation
+                        .replace(/\s+/g, '\\s+');  // Allow flexible whitespace
+                    
+                    console.log(`[HIGHLIGHT] Regex pattern: ${pattern}`);
+                    
+                    // Try full pattern first
+                    patterns.push({
+                        full: new RegExp(pattern, 'gi'),
+                        evidence: evidence,
+                        partial: null
+                    });
+                    
+                    // Also create partial pattern (first 60% of words) for fuzzy matching
+                    const words = evidence.split(/\s+/);
+                    if (words.length >= 3) {
+                        const partialWords = words.slice(0, Math.max(3, Math.ceil(words.length * 0.6)));
+                        const partialEvidence = partialWords.join(' ');
+                        let partialPattern = partialEvidence
+                            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                            .replace(/[.,;:!?'"()[\]{}]/g, '[.,;:!?\'"()\\[\\]{}]*')
+                            .replace(/\s+/g, '\\s+');
+                        
+                        patterns.push({
+                            full: null,
+                            evidence: evidence,
+                            partial: new RegExp(partialPattern, 'gi')
+                        });
+                    }
+                }
+                
+                // Find all matches and their positions
+                const matches = [];
+                
+                for (const {full, partial, evidence} of patterns) {
+                    const regex = full || partial;
+                    const matchType = full ? 'exact' : 'partial';
+                    
+                    let match;
+                    while ((match = regex.exec(content)) !== null) {
+                        // Avoid infinite loop on zero-length matches
+                        if (match.index === regex.lastIndex) {
+                            regex.lastIndex++;
+                        }
+                        
+                        // Extend match to approximately evidence length for partial matches
+                        let endIndex = match.index + match[0].length;
+                        if (matchType === 'partial') {
+                            endIndex = Math.min(content.length, match.index + evidence.length + 20);
+                        }
+                        
+                        matches.push({
+                            start: match.index,
+                            end: endIndex,
+                            text: content.substring(match.index, endIndex),
+                            evidence: evidence,
+                            type: matchType
+                        });
+                        
+                        console.log(`[HIGHLIGHT] ✅ ${matchType.toUpperCase()} match: "${evidence.substring(0, 40)}..." at ${match.index}`);
+                        break; // Only first match per evidence
+                    }
+                }
+                
+                if (matches.length === 0) {
+                    console.log('[HIGHLIGHT] ❌ No regex matches found, trying simple substring search...');
+                    
+                    // Fallback: simple case-insensitive substring search
+                    for (const evidence of evidences) {
+                        const lowerEvidence = evidence.toLowerCase();
+                        const lowerContent = content.toLowerCase();
+                        
+                        const index = lowerContent.indexOf(lowerEvidence);
+                        if (index !== -1) {
+                            const endIndex = Math.min(content.length, index + evidence.length + 20);
+                            matches.push({
+                                start: index,
+                                end: endIndex,
+                                text: content.substring(index, endIndex),
+                                evidence: evidence,
+                                type: 'substring'
+                            });
+                            console.log(`[HIGHLIGHT] ✅ Substring match: "${evidence.substring(0, 40)}..." at ${index}`);
+            } else {
+                            console.log(`[HIGHLIGHT] ❌ Substring not found: "${evidence.substring(0, 40)}..."`);
+                        }
+                    }
+                    
+                    if (matches.length === 0) {
+                        console.log('[HIGHLIGHT] ❌ No matches found with any method');
+                        return this.escapeHtml(content);
+                    }
+                }
+                
+                // Sort matches by position
+                matches.sort((a, b) => a.start - b.start);
+                
+                // Build result with highlights
+                let result = '';
+                let lastIndex = 0;
+                
+                for (const match of matches) {
+                    // Add text before match
+                    result += this.escapeHtml(content.substring(lastIndex, match.start));
+                    
+                    // Add highlighted match
+                    result += '<span class="citation-highlight">' + 
+                             this.escapeHtml(match.text) + 
+                             '</span>';
+                    
+                    lastIndex = match.end;
+                }
+                
+                // Add remaining text
+                result += this.escapeHtml(content.substring(lastIndex));
+                
+                console.log(`[HIGHLIGHT] ✅ Applied ${matches.length} highlights`);
+                return result;
+            }
+            
+            toggleDocCard(docRank) {
+                const card = document.querySelector(`.doc-card[data-doc-rank="${docRank}"]`);
+                const body = document.getElementById(`doc-body-${docRank}`);
+                const expandBtn = document.getElementById(`expand-btn-${docRank}`);
+                
+                if (card && body && expandBtn) {
+                    if (card.classList.contains('collapsed')) {
+                        // Раскрываем
+                        card.classList.remove('collapsed');
+                        card.classList.add('open');
+                        body.style.display = 'block';
+                        expandBtn.textContent = '▼';
+                    } else {
+                        // Сворачиваем
+                        card.classList.remove('open');
+                        card.classList.add('collapsed');
+                        body.style.display = 'none';
+                        expandBtn.textContent = '▶';
+                    }
+                }
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            toggleDocContent(docRank) {
+                const contentDiv = document.getElementById(`doc-content-${docRank}`);
+                const toggleBtn = document.getElementById(`toggle-btn-${docRank}`);
+                
+                if (!contentDiv || !toggleBtn) return;
+                
+                if (contentDiv.classList.contains('expanded')) {
+                    // Collapse
+                    contentDiv.classList.remove('expanded');
+                    toggleBtn.textContent = 'Show More ▼';
+            } else {
+                    // Expand
+                    contentDiv.classList.add('expanded');
+                    toggleBtn.textContent = 'Show Less ▲';
+                }
+            }
+            
+            scrollToCitation(citationNumber) {
+                console.log('[CITATION CLICK] Scrolling to citation', citationNumber);
+                
+                // Убедиться что info panel открыта
+                if (this.infoPanel.classList.contains('collapsed')) {
+                    this.toggleInfoPanel();
+                }
+                
+                // Найти документ с таким рангом
+                const docCard = document.querySelector(`.doc-card[data-doc-rank="${citationNumber}"]`);
+                
+                if (!docCard) {
+                    console.warn(`Document with rank ${citationNumber} not found`);
+                    return;
+                }
+                
+                // Скроллить к документу в info panel
+                this.infoPanelContent.scrollTo({
+                    top: docCard.offsetTop - 20,
+                    behavior: 'smooth'
+                });
+                
+                // Раскрыть документ если свернут (используем новую структуру)
+                if (docCard.classList.contains('collapsed')) {
+                    this.toggleDocCard(citationNumber);
+                }
+                
+                // Временно подсветить документ
+                docCard.classList.add('highlight-active');
+                setTimeout(() => {
+                    docCard.classList.remove('highlight-active');
+                }, 2000);
+                
+                // Подсветить evidences в документе
+                const evidences = this.citationHighlights[citationNumber];
+                if (evidences && evidences.length > 0) {
+                    console.log(`[CITATION] Found ${evidences.length} evidences to highlight:`, evidences);
+                    
+                    // Создаем временное дополнительное подсвечивание для evidences
+                    setTimeout(() => {
+                        const highlightSpans = docCard.querySelectorAll('.citation-highlight');
+                        highlightSpans.forEach((span, index) => {
+                            // Добавляем пульсирующую анимацию
+                            span.style.animation = 'pulse-highlight 1s ease-in-out 3';
+                            setTimeout(() => {
+                                span.style.animation = '';
+                            }, 3000);
+                        });
+                    }, 500); // Даем время на раскрытие документа
+                } else {
+                    console.log(`[CITATION] No evidences found for doc ${citationNumber}`);
+                }
+            }
+
         }
 
-        // Функция для переключения tool calls
-        function toggleToolCall(header) {
-            const content = header.nextElementSibling;
-            const toggle = header.querySelector('.tool-call-toggle');
-            
-            if (content.classList.contains('expanded')) {
-                content.classList.remove('expanded');
-                toggle.classList.remove('expanded');
-            } else {
-                content.classList.add('expanded');
-                toggle.classList.add('expanded');
-            }
-        }
+
 
         // Инициализация приложения
         document.addEventListener('DOMContentLoaded', () => {

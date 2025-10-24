@@ -5,6 +5,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class IdMixin:
 
-    id: Mapped[UUID] = mapped_column(
-        primary_key=True, default=uuid4, server_default=text("gen_random_uuid()")
+    id: Mapped[str] = mapped_column(
+        primary_key=True, default=lambda: str(uuid4())
     )

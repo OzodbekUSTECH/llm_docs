@@ -1168,21 +1168,6 @@
 
             <div class="filters">
                 <div class="filter-group">
-                    <label class="filter-label">Document Type</label>
-                    <select class="filter-input" id="document-type-input">
-                        <option value="">All Types</option>
-                        <option value="INVOICE">📄 Invoices (INVOICE)</option>
-                        <option value="CONTRACT">📋 Contracts (CONTRACT)</option>
-                        <option value="COO">🌍 Certificate of Origin (COO)</option>
-                        <option value="COA">🧪 Certificate of Analysis (COA)</option>
-                        <option value="COW">⚖️ Certificate of Weight (COW)</option>
-                        <option value="BL">🚢 Bill of Lading (BL)</option>
-                        <option value="LC">💳 Letter of Credit (LC)</option>
-                        <option value="FINANCIAL">💰 Financial Reports (FINANCIAL)</option>
-                        <option value="OTHER">📁 Other (OTHER)</option>
-                    </select>
-                </div>
-                <div class="filter-group">
                     <label class="filter-label">Results Limit</label>
                     <input 
                         type="number" 
@@ -1199,7 +1184,7 @@
                         type="number" 
                         class="filter-input" 
                         id="similarity-input" 
-                        value="0.7" 
+                        value="0.5" 
                         min="0" 
                         max="1" 
                         step="0.1"
@@ -1364,6 +1349,12 @@
                 this.uploadProgress.classList.add('active');
                 this.uploadMessage.innerHTML = '';
                 this.progressBar.style.width = '0%';
+                
+                // Очищаем предыдущие сообщения прогресса
+                const existingProgressContainer = this.uploadMessage.querySelector('.progress-messages');
+                if (existingProgressContainer) {
+                    existingProgressContainer.remove();
+                }
 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -1384,32 +1375,87 @@
                         body: formData
                     });
 
-                    clearInterval(progressInterval);
-                    this.progressBar.style.width = '100%';
-                    this.progressText.textContent = 'Processing file...';
-
                     if (!response.ok) {
                         const errorData = await response.json();
                         throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
                     }
 
-                    const result = await response.json();
-                    this.showMessage('success', '✅ File uploaded and processed successfully!');
-                    this.fileInput.value = '';
-                    
-                    // Show button to navigate to document list
-                    setTimeout(() => {
-                        const viewButton = document.createElement('button');
-                        viewButton.className = 'upload-button';
-                        viewButton.textContent = 'Go to Documents List';
-                        viewButton.style.marginTop = '16px';
-                        viewButton.onclick = () => this.switchTab('list');
-                        
-                        const messageDiv = this.uploadMessage.querySelector('.success');
-                        if (messageDiv) {
-                            messageDiv.appendChild(viewButton);
+                    // Handle streaming response
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop(); // Keep incomplete line in buffer
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    
+                                    if (data.type === 'success') {
+                                        clearInterval(progressInterval);
+                                        this.progressBar.style.width = '100%';
+                                        this.progressText.textContent = '✅ Processing complete!';
+                                        this.showMessage('success', '✅ File uploaded and processed successfully!');
+                                        this.fileInput.value = '';
+                                        this.loadDocuments();
+                                        return;
+                                    } else if (data.content) {
+                                        // Показываем все сообщения из стриминга
+                                        console.log('Stream message:', data.content);
+                                        
+                                        // Добавляем сообщение в область загрузки
+                                        this.addProgressMessage(data.content);
+                                        
+                                        // Update progress based on content
+                                        if (data.content.includes('Saved file')) {
+                                            this.progressText.textContent = '📁 File saved...';
+                                        } else if (data.content.includes('Converting') && data.content.includes('to text')) {
+                                            this.progressText.textContent = '📄 Converting to text...';
+                                        } else if (data.content.includes('Converted') && data.content.includes('text blocks')) {
+                                            this.progressText.textContent = '📊 Analyzing document structure...';
+                                        } else if (data.content.includes('Processing') && data.content.includes('tables')) {
+                                            this.progressText.textContent = '📊 Processing tables with context...';
+                                        } else if (data.content.includes('Table') && data.content.includes('processed')) {
+                                            this.progressText.textContent = '📊 Processing individual tables...';
+                                        } else if (data.content.includes('Final chunks:')) {
+                                            this.progressText.textContent = '📊 Finalizing table and text chunks...';
+                                        } else if (data.content.includes('WARNING:')) {
+                                            this.progressText.textContent = '⚠️ Checking table integrity...';
+                                        } else if (data.content.includes('ERROR:')) {
+                                            this.progressText.textContent = '❌ Table processing error detected...';
+                                        } else if (data.content.includes('FIXED:')) {
+                                            this.progressText.textContent = '🔧 Fixing table processing...';
+                                        } else if (data.content.includes('Split text into')) {
+                                            this.progressText.textContent = '✂️ Splitting text into chunks...';
+                                        } else if (data.content.includes('Processed') && data.content.includes('chunks')) {
+                                            this.progressText.textContent = '✂️ Processing chunks...';
+                                        } else if (data.content.includes('Created embedding')) {
+                                            this.progressText.textContent = '🧠 Creating embeddings...';
+                                        } else if (data.content.includes('Finished indexing')) {
+                                            this.progressText.textContent = '💾 Finalizing...';
+                                        } else if (data.content.includes('=>')) {
+                                            // Показываем общие сообщения прогресса
+                                            this.progressText.textContent = data.content.replace(' => ', '');
+                                        }
+                                        
+                                        // Update progress bar gradually
+                                        const currentProgress = Math.min(progress + 2, 95);
+                                        this.progressBar.style.width = currentProgress + '%';
+                                        progress = currentProgress;
+                                    }
+                                } catch (e) {
+                                    console.warn('Failed to parse streaming data:', line);
+                                }
+                            }
                         }
-                    }, 100);
+                    }
                 } catch (error) {
                     console.error('Upload error:', error);
                     this.showMessage('error', '❌ Upload error: ' + error.message);
@@ -1426,6 +1472,40 @@
                 this.uploadMessage.innerHTML = `<div class="${type}">${text}</div>`;
             }
 
+            addProgressMessage(message) {
+                // Создаем контейнер для сообщений прогресса, если его нет
+                let progressContainer = this.uploadMessage.querySelector('.progress-messages');
+                if (!progressContainer) {
+                    progressContainer = document.createElement('div');
+                    progressContainer.className = 'progress-messages';
+                    progressContainer.style.cssText = `
+                        max-height: 200px;
+                        overflow-y: auto;
+                        background: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        border-radius: 8px;
+                        padding: 12px;
+                        margin-top: 12px;
+                        font-size: 14px;
+                        line-height: 1.4;
+                    `;
+                    this.uploadMessage.appendChild(progressContainer);
+                }
+
+                // Добавляем новое сообщение
+                const messageDiv = document.createElement('div');
+                messageDiv.style.cssText = `
+                    margin-bottom: 4px;
+                    color: #495057;
+                    font-family: 'Courier New', monospace;
+                `;
+                messageDiv.textContent = message;
+                progressContainer.appendChild(messageDiv);
+
+                // Прокручиваем к последнему сообщению
+                progressContainer.scrollTop = progressContainer.scrollHeight;
+            }
+
             // List functions
             async loadDocuments(page = 1) {
                 this.currentPage = page;
@@ -1437,7 +1517,7 @@
                 `;
 
                 try {
-                    const response = await fetch(`/documents/?page=${page}&page_size=${this.pageSize}`);
+                    const response = await fetch(`/documents/?page=${page}&size=${this.pageSize}`);
                     
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -1445,7 +1525,7 @@
 
                     const data = await response.json();
                     this.displayDocuments(data.items, 'list');
-                    this.updatePagination(data.total, data.page, data.page_size);
+                    this.updatePagination(data.total, data.page, data.size);
                 } catch (error) {
                     console.error('Load error:', error);
                     this.documentsListContainer.innerHTML = `
@@ -1512,14 +1592,14 @@
                         <div class="empty-state">
                             <div class="empty-state-icon">📄</div>
                             <h3>No Documents</h3>
-                            <p>Upload documents through the chat using file upload commands</p>
+                            <p>Upload documents using the Upload tab above</p>
                         </div>
                     `;
                     return;
                 }
 
                 const documentsHTML = documents.map((doc, index) => {
-                    const docId = doc.id;
+                    const docId = doc.id || doc.source_id;
 
                     const similarity = doc.max_similarity ? `
                         <div class="similarity-badge">${(doc.max_similarity * 100).toFixed(1)}%</div>
@@ -1529,45 +1609,41 @@
                     const chunksInfo = context === 'search' && doc.chunks_count > 1 ? 
                         ` • ${doc.chunks_count} fragments` : '';
                     
-                    const documentTypeIcon = this.getDocumentTypeIcon(doc.type);
-                    const documentTypeName = this.getDocumentTypeName(doc.type);
+                    // Format file size
+                    const formatSize = (bytes) => {
+                        if (!bytes) return 'Unknown size';
+                        const sizes = ['B', 'KB', 'MB', 'GB'];
+                        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+                        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+                    };
                     
-                    // Display keywords instead of content in list view
-                    let keywordsDisplay = '';
-                    if (doc.keywords && Object.keys(doc.keywords).length > 0) {
-                        const keywordsArray = [];
-                        for (const [key, value] of Object.entries(doc.keywords)) {
-                            const displayValue = typeof value === 'object' && value.value ? value.value : value;
-                            if (displayValue) {
-                                keywordsArray.push(`<span class="keyword-tag"><strong>${key}:</strong> ${this.escapeHtml(displayValue)}</span>`);
-                            }
-                        }
-                        // Show only first 3 keywords in list view
-                        keywordsDisplay = keywordsArray.slice(0, 3).join(' ');
-                        if (keywordsArray.length > 3) {
-                            keywordsDisplay += ` <span class="keyword-more">+${keywordsArray.length - 3} more</span>`;
-                        }
-                    } else {
-                        keywordsDisplay = '<span class="no-keywords">No keywords extracted</span>';
-                    }
+                    // Show chunks info for list view
+                    const chunksDisplay = context === 'list' ? `
+                        <div class="document-keywords">
+                            <div class="keywords-label">📊 Statistics:</div>
+                            <div class="keywords-content">
+                                <span class="keyword-tag"><strong>Size:</strong> ${formatSize(doc.size || doc.file_size)}</span>
+                                <span class="keyword-tag"><strong>Document Chunks:</strong> ${doc.document_chunks || 0}</span>
+                                <span class="keyword-tag"><strong>Vector Chunks:</strong> ${doc.vector_chunks || 0}</span>
+                                <span class="keyword-tag"><strong>Total Chunks:</strong> ${doc.total_chunks || 0}</span>
+                            </div>
+                        </div>
+                    ` : '';
                     
                     return `
                         <div class="document-card" data-doc-id="${docId}">
                             <div class="document-header">
                                 <div style="flex: 1;">
-                                    <div class="document-title">${this.escapeHtml(doc.original_filename || doc.filename)}</div>
+                                    <div class="document-title">${this.escapeHtml(doc.name || doc.filename)}</div>
                                     <div class="document-meta">
-                                        ${documentTypeIcon} ${documentTypeName} • ${doc.content_type || 'Unknown Type'} • 
+                                        📄 Document • ${formatSize(doc.size || doc.file_size)} • 
                                         ${new Date(doc.created_at).toLocaleDateString('en-US')}${chunksInfo}
                                     </div>
                                 </div>
                                 ${similarity}
                             </div>
                             
-                            <div class="document-keywords">
-                                <div class="keywords-label">🔑 Keywords:</div>
-                                <div class="keywords-content">${keywordsDisplay}</div>
-                            </div>
+                            ${chunksDisplay}
                             
                             <div class="document-actions">
                                 <button class="action-button primary" onclick="documentsApp.viewDocument('${docId}')">
@@ -1576,8 +1652,8 @@
                                 <button class="action-button" onclick="documentsApp.viewDocumentChunks('${docId}')">
                                     🔎 View Chunks
                                 </button>
-                                <button class="action-button" onclick="documentsApp.downloadDocument('${docId}')">
-                                    💾 Download
+                                <button class="action-button" onclick="documentsApp.searchInDocument('${docId}')">
+                                    🔍 Search in Doc
                                 </button>
                                 <button class="action-button danger" onclick="documentsApp.deleteDocument('${docId}')">
                                     🗑️ Delete
@@ -1597,7 +1673,6 @@
 
                 const limit = parseInt(this.limitInput.value);
                 const similarity = parseFloat(this.similarityInput.value);
-                const documentType = this.documentTypeInput.value;
 
                 this.searchButton.disabled = true;
                 this.searchResultsContainer.innerHTML = `
@@ -1608,10 +1683,7 @@
                     `;
 
                 try {
-                    let searchUrl = `/documents/search?query=${encodeURIComponent(query)}&limit=${limit}&similarity_threshold=${similarity}`;
-                    if (documentType) {
-                        searchUrl += `&document_types=${encodeURIComponent(documentType)}`;
-                    }
+                    let searchUrl = `/documents/search?query=${encodeURIComponent(query)}&limit=${limit}&similarity_threshold=${similarity}&use_hybrid_search=true`;
                     
                     const response = await fetch(searchUrl);
                     
@@ -1659,72 +1731,52 @@
                     }
 
                     const doc = await response.json();
-                    this.modalTitle.textContent = doc.original_filename || doc.filename;
+                    this.modalTitle.textContent = doc.name;
 
-                    const documentTypeIcon = this.getDocumentTypeIcon(doc.type);
-                    const documentTypeName = this.getDocumentTypeName(doc.type);
+                    // Format file size
+                    const formatSize = (bytes) => {
+                        if (!bytes) return 'Unknown size';
+                        const sizes = ['B', 'KB', 'MB', 'GB'];
+                        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+                        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+                    };
                     
                     let content = `
                         <div class="metadata-section">
                             <div class="section-title">📋 Document Information</div>
-                            <div><strong>File:</strong> ${this.escapeHtml(doc.filename)}</div>
-                            <div><strong>Original Name:</strong> ${this.escapeHtml(doc.original_filename)}</div>
-                            <div><strong>Document Type:</strong> ${documentTypeIcon} ${documentTypeName}</div>
-                            <div><strong>File Format:</strong> ${this.escapeHtml(doc.content_type)}</div>
-                            <div><strong>Status:</strong> ${this.escapeHtml(doc.status)}</div>
+                            <div><strong>Name:</strong> ${this.escapeHtml(doc.name)}</div>
+                            <div><strong>Size:</strong> ${formatSize(doc.size)}</div>
+                            <div><strong>Document Chunks:</strong> ${doc.document_chunks}</div>
+                            <div><strong>Vector Chunks:</strong> ${doc.vector_chunks}</div>
+                            <div><strong>Total Chunks:</strong> ${doc.total_chunks}</div>
+                            <div><strong>Indexes:</strong> ${doc.indexes}</div>
                             <div><strong>Created:</strong> ${new Date(doc.created_at).toLocaleString('en-US')}</div>
-                            ${doc.doc_metadata && doc.doc_metadata.parsing_method ? 
-                                `<div><strong>Parsing Method:</strong> ${this.escapeHtml(doc.doc_metadata.parsing_method)}</div>` : ''}
+                            ${doc.updated_at ? `<div><strong>Updated:</strong> ${new Date(doc.updated_at).toLocaleString('en-US')}</div>` : ''}
                         </div>
                     `;
 
-                    // Add keywords section if available
-                    if (doc.keywords && Object.keys(doc.keywords).length > 0) {
-                        content += `
-                            <div class="keywords-section">
-                                <div class="section-title">🔑 Extracted Keywords</div>
-                                <div class="keywords-grid">
-                        `;
-                        
-                        for (const [key, value] of Object.entries(doc.keywords)) {
-                            const displayValue = typeof value === 'object' && value.value ? value.value : value;
-                            const context = typeof value === 'object' && value.context ? value.context : '';
-                            
-                            content += `
-                                <div class="keyword-item">
-                                    <div class="keyword-key">${this.escapeHtml(key)}</div>
-                                    <div class="keyword-value">${this.escapeHtml(displayValue)}</div>
-                                    ${context ? `<div class="keyword-context">${this.escapeHtml(context.substring(0, 100))}${context.length > 100 ? '...' : ''}</div>` : ''}
-                                </div>
-                            `;
-                        }
-                        
-                        content += `
-                                </div>
-                            </div>
-                        `;
-                    }
-
-                    // Always show markdown content - it's the most complete and readable
-                    if (doc.content) {
+                    // Show preview chunks if available
+                    if (doc.chunks && doc.chunks.length > 0) {
                         content += `
                             <div class="content-section">
-                                <div class="section-title">📄 Document Content</div>
-                                <div class="markdown-content">${this.renderMarkdown(doc.content)}</div>
+                                <div class="section-title">📄 Document Preview (First ${doc.chunks.length} chunks)</div>
+                                ${doc.chunks.map((chunk, i) => `
+                                    <div class="document-card" style="margin-bottom: 12px;">
+                                        <div class="document-header">
+                                            <div class="document-title">Chunk ${i + 1}</div>
+                                        </div>
+                                        <div class="markdown-content">${this.renderMarkdown(chunk.content)}</div>
+                                    </div>
+                                `).join('')}
                             </div>
                         `;
                     } else {
                         content += `
                             <div class="empty-state">
                                 <div class="empty-state-icon">📄</div>
-                                <p>Content not found</p>
+                                <p>No preview chunks available</p>
                             </div>
                         `;
-                    }
-
-                    // Отображаем таблицы если есть
-                    if (doc.tables && doc.tables.length > 0) {
-                        content += this.renderTables(doc.tables);
                     }
 
                     this.modalContent.innerHTML = content;
@@ -1740,13 +1792,13 @@
                 this.modal.classList.add('show');
 
                 try {
-                    const response = await fetch(`/documents/${id}/chunks`);
+                    const response = await fetch(`/documents/${id}/chunks?page=1&size=50`);
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
 
-                    const chunks = await response.json();
-                    if (!Array.isArray(chunks) || chunks.length === 0) {
+                    const data = await response.json();
+                    if (!data.chunks || data.chunks.length === 0) {
                         this.modalContent.innerHTML = `
                             <div class="empty-state">
                                 <div class="empty-state-icon">📄</div>
@@ -1759,20 +1811,82 @@
 
                     const html = `
                         <div class="content-section">
-                            <div class="section-title">🔎 Document Chunks (${chunks.length})</div>
-                            ${chunks.map(c => `
+                            <div class="section-title">🔎 Document Chunks for "${data.source_name}" (${data.total} total, showing ${data.chunks.length})</div>
+                            ${data.chunks.map((chunk, i) => `
                                 <div class="document-card" style="margin-bottom: 12px;">
                                     <div class="document-header">
-                                        <div class="document-title">Chunk #${c.chunk_index}</div>
+                                        <div class="document-title">Chunk ${i + 1}</div>
+                                        <div class="document-meta">
+                                            ${chunk.metadata && chunk.metadata.page_label ? `Page: ${chunk.metadata.page_label}` : ''}
+                                        </div>
                                     </div>
-                                    <div class="markdown-content">${this.renderMarkdown(c.content)}</div>
+                                    <div class="markdown-content">${this.renderMarkdown(chunk.content)}</div>
+                                </div>
+                            `).join('')}
+                            ${data.total > data.chunks.length ? `
+                                <div class="document-card">
+                                    <div class="document-header">
+                                        <div class="document-title">... and ${data.total - data.chunks.length} more chunks</div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    this.modalContent.innerHTML = html;
+                } catch (error) {
+                    console.error('View chunks error:', error);
+                    this.modalContent.innerHTML = `<div class="error">${error.message}</div>`;
+                }
+            }
+
+            async searchInDocument(id) {
+                const query = prompt('Enter search query for this document:');
+                if (!query) return;
+
+                this.modalTitle.textContent = 'Search Results';
+                this.modalContent.innerHTML = '<div class="loading"><div class="loading-spinner"></div><div>Searching...</div></div>';
+                this.modal.classList.add('show');
+
+                try {
+                    const response = await fetch(`/documents/${id}/search?query=${encodeURIComponent(query)}&limit=10&similarity_threshold=0.3`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const results = await response.json();
+                    if (results.length === 0) {
+                        this.modalContent.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">🔍</div>
+                                <h3>Nothing Found</h3>
+                                <p>No results found for "${query}" in this document</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    const html = `
+                        <div class="content-section">
+                            <div class="section-title">🔍 Search Results for "${query}" (${results.length} found)</div>
+                            ${results.map((result, i) => `
+                                <div class="document-card" style="margin-bottom: 12px;">
+                                    <div class="document-header">
+                                        <div class="document-title">Result ${i + 1}</div>
+                                        <div class="similarity-badge">${(result.similarity * 100).toFixed(1)}%</div>
+                                    </div>
+                                    <div class="document-meta">
+                                        Semantic: ${(result.semantic_score * 100).toFixed(1)}% | 
+                                        Keyword: ${(result.keyword_score * 100).toFixed(1)}% | 
+                                        ${result.page_label ? `Page: ${result.page_label}` : ''}
+                                    </div>
+                                    <div class="markdown-content">${this.renderMarkdown(result.full_chunk)}</div>
                                 </div>
                             `).join('')}
                         </div>
                     `;
                     this.modalContent.innerHTML = html;
                 } catch (error) {
-                    console.error('View chunks error:', error);
+                    console.error('Search in document error:', error);
                     this.modalContent.innerHTML = `<div class="error">${error.message}</div>`;
                 }
             }

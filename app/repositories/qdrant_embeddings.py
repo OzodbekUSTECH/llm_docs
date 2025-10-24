@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
 import uuid
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
@@ -6,6 +6,9 @@ from qdrant_client.http.models import Distance, ScoredPoint, VectorParams, Point
 import numpy as np
 
 from app.dto.qdrant_filters import QdrantFilters
+
+if TYPE_CHECKING:
+    from app.services.document_chunker import Chunk
 
 
 class QdrantEmbeddingsRepository:
@@ -89,6 +92,58 @@ class QdrantEmbeddingsRepository:
                     "content_type": metadata.get("content_type", ""),
                     "document_type": metadata.get("document_type", "OTHER"),
                 })
+            
+            points.append(
+                PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload=payload
+                )
+            )
+        
+        await self.client.upsert(
+            collection_name=collection_name,
+            points=points
+        )
+    
+    async def bulk_create_embeddings_with_metadata(
+        self,
+        collection_name: str,
+        document_id: str,
+        chunks: List["Chunk"],  # Наши Chunk объекты с rich метаданными
+        embeddings: List[List[float]],
+    ) -> None:
+        """
+        Сохраняет чанки с расширенными метаданными в Qdrant.
+        
+        Используется новым DocumentChunker для сохранения структурированных чанков
+        с богатыми метаданными (section_title, chunk_type, invoice_section, etc.)
+        
+        Args:
+            collection_name: Название коллекции
+            document_id: ID документа
+            chunks: Список Chunk объектов с текстом и метаданными
+            embeddings: Список векторных представлений
+        """
+        from app.services.document_chunker import Chunk
+        
+        points = []
+        for chunk, embedding in zip(chunks, embeddings):
+            point_id = str(uuid.uuid4())
+            
+            # Базовый payload
+            payload = {
+                "document_id": document_id,
+                "chunk_index": chunk.index,
+                "chunk_content": chunk.text,
+                "chunk_length": len(chunk.text),
+                "token_count": chunk.token_count,
+            }
+            
+            # Добавляем все метаданные из чанка
+            # Это могут быть: section_title, section_number, section_level,
+            # chunk_type, invoice_section, part, filename, content_type, document_type и др.
+            payload.update(chunk.metadata)
             
             points.append(
                 PointStruct(

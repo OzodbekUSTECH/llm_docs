@@ -13,3 +13,5 @@ logs/
 .vscode/
 storage/*
 !storage/.gitkeep
+
+lancedb/

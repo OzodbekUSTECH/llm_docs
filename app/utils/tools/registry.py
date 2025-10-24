@@ -8,6 +8,9 @@ from app.utils.tools.rules import (
     search_rules,
     get_rule_by_id
 )
+from app.utils.tools.parser import (
+    get_document_clauses,
+)
 
 # Для Ollama нужно передавать функции как объекты, а не как значения словаря
 available_tools = [

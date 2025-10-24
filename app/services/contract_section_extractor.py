@@ -65,32 +65,43 @@ class ContractSectionExtractor:
     ]
 
     async def extract(self, content: str) -> List[dict]:
-        """Return list of {title, content} in the specified order; skip empty."""
+        """
+        Return a list of {title, content} sections, splitting each section into smaller logically coherent chunks
+        if the content is too large, while avoiding overly small or excessively large segments.
+        """
 
         ordered_titles = "\n".join([f"- {t}" for t in self.DEFAULT_ORDERED_TITLES])
 
+        # NEW SYSTEM INSTRUCTION IN ENGLISH, fulfilling user's request:
         system = (
-            "You are an expert contract parser. Split the contract text into logically distinct "
-            "sections using the provided ordered list of expected headings. Match headings "
-            "robustly (case-insensitive, tolerate numbering and punctuation). Keep the original order. "
-            "Include a section only if meaningful content exists. For 'ISPS' and 'CONTACTS' split into the two sub-sections as listed. "
-            "If there are tables relevant to any section, include their markdown under that section content. "
-            "Critically: for EACH expected heading, COLLECT ALL content that belongs to it from the ENTIRE contract. "
-            "This includes multiple occurrences throughout the document (e.g., repeated PRICE clauses); MERGE them in original order. "
-            "Do NOT paraphrase or reword the source text; preserve the original wording. "
-            "You MAY minimally normalize spacing for readability (collapse excessive blank lines, fix list bullets/indentation), and keep tables as markdown if present. "
-            "Maintain original clauses, numbering, and structure; no summaries. "
-            "If any important information does not clearly belong to the predefined sections, place it under 'ADDITIONAL INFORMATION'."
+            "You are an expert contract parser. "
+            "Split the contract text into logically distinct sections and chunks as follows:\n"
+            "1. Use the provided ordered list of expected section headings. Match headings robustly (case-insensitive, support numbering and punctuation). Keep the original order.\n"
+            "2. For EACH expected heading, extract ALL relevant content from ANYWHERE in the contract, including repeated and scattered occurrences. Merge them in original text order.\n"
+            "3. For each section, if the content is long, SPLIT it into smaller, logically coherent chunks. "
+            "Chunks must NOT be so small that they are meaningless, and NOT so large as to be unwieldy (aim for ~100–300 words or 500–1500 tokens per chunk, but keep sentences and meaning intact; never break in the middle of a sentence or logical item). "
+            "Split at logical boundaries: paragraph, sub-clause, numbered list, sentence. Avoid cutting a logical point, even if near a soft token/length limit.\n"
+            "4. The output must be a JSON array of objects, each having:\n"
+            "  - 'title': exactly as from the headings list, indicating the section to which the chunk belongs\n"
+            "  - 'content': a chunk of original contract text or markdown, not paraphrased or summarized\n"
+            "If a section yields multiple chunks, repeat the 'title' for each chunked segment, preserving their order within the contract.\n"
+            "5. For 'ISPS CODE COMPLIANCE CLAUSES' and 'CONTACTS', split as listed in the headings; do not merge them.\n"
+            "6. Include tables as markdown under the most relevant chunk.\n"
+            "7. Do NOT paraphrase, summarize, or invent content. "
+            "Minimal normalization is allowed for whitespace, line breaks, and consistent list/table format.\n"
+            "8. Omit sections with no meaningful content. If important content does not fit any predefined section, place it under 'ADDITIONAL INFORMATION'.\n"
+            "IMPORTANT: Each chunk must be long enough to be meaningful, but not overly long—never break in the middle of a sentence or logical point."
         )
 
         user = (
             f"Expected headings in order:\n{ordered_titles}\n\n"
-            "For each heading, extract ALL related content from the whole contract. If a heading appears multiple times or content is scattered, MERGE all parts keeping the original text order yourself. "
-            "Include everything until the next heading begins each time (paragraphs, lists, sub-clauses, tables as markdown). "
-            "Return JSON with an array 'sections', each item has 'title' and 'content'. "
-            "Title must be exactly from the expected list above. Content must be from the contract (plain text/markdown), not invented, not paraphrased, not summarized. "
-            "You may only normalize spacing and list/table formatting minimally for readability; preserve wording. "
-            "Return AT MOST ONE item per title. If no content for a title, omit that title.\n\n"
+            "For each heading, extract ALL related content across the contract. If a heading appears or is relevant in multiple places, MERGE all parts accordingly, preserving their order.\n"
+            "If a section's total content is too lengthy or diverse, SPLIT it by logical paragraphs, list items, or at complete sentence boundaries. Keep each chunk useful and readable—do not make them too short or excessively large.\n"
+            "Return JSON as an array named 'sections': each object must have 'title' (from the list above) and 'content' (a non-empty, meaningful chunk of contract verbatim text or markdown). "
+            "If splitting yields multiple content parts for one title, make separate array elements sharing the same 'title', ordered as found. "
+            "Content must be direct from the contract (never invented or summarized), only minimally normalized for clean structure. "
+            "Do not include empty or trivial chunks. "
+            "Return AT MOST one JSON object per chunk, always associating it with its section 'title'.\n\n"
             f"CONTRACT TEXT:\n{content}"
         )
 
@@ -104,7 +115,7 @@ class ContractSectionExtractor:
         )
 
         output: ContractSectionsOutput = response.output_parsed
-        # Convert to list of dicts; GPT must already aggregate per title
+        # Note: Now, output.sections may include multiple chunks per title
         items: List[dict] = []
         for section in output.sections:
             title = section.title.strip()
@@ -113,12 +124,13 @@ class ContractSectionExtractor:
                 continue
             items.append({"title": title, "content": content_text})
 
-        # Reorder strictly by DEFAULT_ORDERED_TITLES, dropping unknowns
+        # Strictly order items by DEFAULT_ORDERED_TITLES, preserving chunked order for repeated titles
         order_index = {t: i for i, t in enumerate(self.DEFAULT_ORDERED_TITLES)}
         items = [it for it in items if it["title"] in order_index]
+        # Since chunks may repeat the same title, secondary sort is not needed
         items.sort(key=lambda x: order_index[x["title"]])
 
-        logger.info(f"Extracted {len(items)} contract sections")
+        logger.info(f"Extracted {len(items)} contract section chunks")
         return items
 
     async def extract_invoice_fields(self, content: str) -> List[dict]:

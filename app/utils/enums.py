@@ -23,3 +23,8 @@ class DocumentType(str, Enum):
     LC = "LC" # letter of credit
     OTHER = "OTHER"
     
+    
+    
+class IndexType(str, Enum):
+    VECTOR = "VECTOR"
+    DOCUMENT = "DOCUMENT"

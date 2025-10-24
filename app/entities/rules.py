@@ -17,7 +17,7 @@ class Rule(Base,IdMixin, TimestampMixin):
     title: Mapped[str]
     description: Mapped[str]
     
-    category_id: Mapped[UUID] = mapped_column(ForeignKey("rule_categories.id"))
+    category_id: Mapped[str] = mapped_column(ForeignKey("rule_categories.id"))
     category: Mapped["RuleCategory"] = relationship(back_populates="rules")
     
     

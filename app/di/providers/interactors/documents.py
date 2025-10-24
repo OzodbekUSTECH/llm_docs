@@ -5,8 +5,12 @@ from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
 from app.interactors.chat.generate import GenerateAnswerInteractor
 from app.interactors.chat.openai_generate import OpenAIGenerateInteractor
-from app.interactors.documents.get import GetAllDocumentsInteractor, GetDocumentByIdInteractor
-from app.interactors.documents.get_chunks import GetDocumentChunksInteractor
+from app.interactors.documents.get import (
+    GetAllDocumentsInteractor, 
+    GetDocumentByIdInteractor,
+    GetDocumentChunksInteractor
+)
+from app.interactors.documents.create_v2 import CreateDocumentV2Interactor
 
 
 class DocumentsInteractorProvider(Provider):
@@ -22,4 +26,5 @@ class DocumentsInteractorProvider(Provider):
         GetAllDocumentsInteractor,
         GetDocumentByIdInteractor,
         GetDocumentChunksInteractor,
+        CreateDocumentV2Interactor,
     )

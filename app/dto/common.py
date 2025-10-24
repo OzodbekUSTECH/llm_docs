@@ -9,7 +9,7 @@ class BaseModelResponse(BaseModel):
     Base response model for all entities.
     """
 
-    id: UUID
+    id: str
 
     model_config = ConfigDict(from_attributes=True)
 

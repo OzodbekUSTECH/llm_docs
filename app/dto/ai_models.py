@@ -31,3 +31,35 @@ class InvoiceField(BaseModel):
 class InvoiceFieldsOutput(BaseModel):
     """Structured output from LLM for invoice key-value fields."""
     fields: List[InvoiceField] = Field(default_factory=list)
+
+
+# ===== Parser (LLM OCR) unified output models =====
+
+class DocTypeClassification(BaseModel):
+    """LLM classification result for document type."""
+    document_type: Literal[
+        "INVOICE",
+        "CONTRACT",
+        "COO",
+        "COA",
+        "COW",
+        "COQ",
+        "BL",
+        "FINANCIAL",
+        "LC",
+        "OTHER",
+    ]
+    confidence: float = Field(description="0..1 confidence score")
+
+
+class ParsedChunk(BaseModel):
+    """Single parsed chunk with clause and content."""
+    title: str = Field(description="Human-friendly section or clause title")
+    clause: str | None = Field(default=None, description="Canonical clause name if applicable")
+    content: str = Field(description="Full text content including any tables in markdown form")
+
+
+class ParsedDocumentOutput(BaseModel):
+    """Unified parsed document output for embeddings and storage."""
+    document_type: DocTypeClassification
+    chunks: List[ParsedChunk] = Field(default_factory=list)

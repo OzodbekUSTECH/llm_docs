@@ -3,7 +3,6 @@ import hashlib
 import uuid
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from docling_core.types.doc.document import DoclingDocument
 from fastapi import UploadFile
 from sentence_transformers import SentenceTransformer
 
@@ -16,10 +15,9 @@ from app.utils.enums import DocumentStatus, DocumentType
 from app.exceptions.app_error import AppError
 from qdrant_client import AsyncQdrantClient
 from app.utils.collections import Collections
-from docling.document_converter import DocumentConverter
-from docling.chunking import HybridChunker
 from app.services.keyword_extractor import KeywordExtractor
 from app.services.contract_section_extractor import ContractSectionExtractor
+from app.services.document_chunker import DocumentChunker, Chunk
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,11 +30,10 @@ class CreateDocumentInteractor:
         qdrant_embeddings_repository: QdrantEmbeddingsRepository,
         sentence_transformer: SentenceTransformer,
         qdrant_client: AsyncQdrantClient,
-        document_converter: DocumentConverter,
-        docling_chunker: HybridChunker,
         keyword_extractor: KeywordExtractor,
         contract_section_extractor: ContractSectionExtractor,
-        document_parser: DocumentParserOpenAI
+        document_parser: DocumentParserOpenAI,
+        document_chunker: DocumentChunker
     ):
         self.uow = uow
         self.documents_repository = documents_repository
@@ -45,11 +42,10 @@ class CreateDocumentInteractor:
         self.qdrant_client = qdrant_client
         self.storage_dir = Path("storage/documents")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-        self.document_converter = document_converter
-        self.docling_chunker = docling_chunker
         self.keyword_extractor = keyword_extractor
         self.contract_section_extractor = contract_section_extractor
         self.document_parser = document_parser
+        self.document_chunker = document_chunker
         
     def _detect_document_type(self, filename: str, content: str) -> DocumentType:
         """
@@ -161,127 +157,12 @@ class CreateDocumentInteractor:
         logger.info("Could not detect specific document type, using OTHER")
         return DocumentType.OTHER
         
-    async def _extract_text_and_tables(self, file_path: str) -> Tuple[Optional[str], List[Dict]]:
-        """Extract text content and tables from file using Docling"""
-        file_path = Path(file_path)
-        
-        if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-        
-        # Handle plain text files directly (Docling doesn't support them)
-        if file_path.suffix.lower() == '.txt':
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                logger.info(f"Read plain text file directly: {len(content)} characters")
-                return content, []  # No tables in plain text
-            except Exception as e:
-                logger.error(f"Failed to read plain text file {file_path}: {e}")
-                raise Exception(f"Plain text file reading failed: {str(e)}")
-        
-        try:
-            # Run Docling conversion in a thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, 
-                self.document_converter.convert, 
-                str(file_path)
-            )
-            
-            
-            # Export to markdown for rich text preservation
-            # This includes tables, lists, headers, and other structure
-            markdown_content = result.document.export_to_markdown()
-            
-            # If markdown is empty, try plain text export
-            if not markdown_content or not markdown_content.strip():
-                # Fall back to text representation
-                text_content = str(result.document)
-                content = text_content if text_content.strip() else None
-            else:
-                content = markdown_content
-            
-            # Extract tables from the document
-            tables = []
-            try:
-                # Docling provides tables through the document structure
-                if hasattr(result.document, 'tables'):
-                    for idx, table in enumerate(result.document.tables):
-                        # Convert table to a structured format
-                        table_data = {
-                            "index": idx,
-                            "rows": [],
-                            "headers": [],
-                            "caption": getattr(table, 'caption', None)
-                        }
-                        
-                        # Extract table content - convert TableData to JSON-serializable format
-                        if hasattr(table, 'data') and table.data:
-                            # table.data is a TableData object, extract its grid
-                            if hasattr(table.data, 'grid'):
-                                # Convert grid of TableCell objects to simple array of arrays
-                                table_rows = []
-                                for row in table.data.grid:
-                                    row_data = []
-                                    for cell in row:
-                                        if hasattr(cell, 'text'):
-                                            row_data.append(cell.text)
-                                        else:
-                                            row_data.append(str(cell))
-                                    table_rows.append(row_data)
-                                table_data["rows"] = table_rows
-                                
-                                # Try to extract headers from first row if they are marked as headers
-                                if table_rows and hasattr(table.data, 'grid') and len(table.data.grid) > 0:
-                                    first_row = table.data.grid[0]
-                                    if any(hasattr(cell, 'column_header') and cell.column_header for cell in first_row):
-                                        table_data["headers"] = table_rows[0]
-                                        table_data["rows"] = table_rows[1:]  # Remove header row from data
-                                    
-                        # Try to get HTML representation if available
-                        try:
-                            if hasattr(table, 'to_html'):
-                                table_data["html"] = table.to_html()
-                        except:
-                            pass
-                        
-                        # Try to get CSV representation if available
-                        try:
-                            if hasattr(table, 'to_csv'):
-                                table_data["csv"] = table.to_csv()
-                        except:
-                            pass
-                            
-                        tables.append(table_data)
-                        logger.info(f"Extracted table {idx} with {len(table_data.get('rows', []))} rows from document")
-                
-                # Also check for tables in the document elements
-                if hasattr(result.document, 'elements'):
-                    for element in result.document.elements:
-                        if hasattr(element, 'type') and element.type == 'table':
-                            table_data = {
-                                "index": len(tables),
-                                "content": str(element),
-                                "type": "element_table"
-                            }
-                            tables.append(table_data)
-                            
-            except Exception as e:
-                logger.warning(f"Failed to extract tables: {e}")
-                # Continue processing even if table extraction fails
-            
-            logger.info(f"Extracted {len(tables)} tables from document")
-            return content, tables, result.document
-            
-        except Exception as e:
-            logger.error(f"Docling extraction failed for {file_path}: {e}")
-            raise Exception(f"Document extraction failed: {str(e)}")
+    # Docling flow removed: all parsing handled by LLM OCR parser
+    async def _extract_text_and_tables(self, file_path: str):
+        raise NotImplementedError("Docling extraction is disabled; use LLM parser")
 
     async def execute(self, file: UploadFile) -> Document:
-        """
-        Парсинг файла с использованием Docling библиотеки.
-        Docling обеспечивает более качественное извлечение текста с сохранением структуры документа.
-        """
+        """LLM-only parsing with OpenAI OCR, clause-aware chunking, and vector storage."""
         # 1. Читаем файл в память
         file_bytes = await file.read()
 
@@ -308,26 +189,21 @@ class CreateDocumentInteractor:
             f.write(file_bytes)
             
         try:
-            # content, tables, dl_doc = await self._extract_text_and_tables(file_path)
-            # print(f"✅ Docling документ извлечен: {content}")
-            
-            # if not content:
-            #     raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
-            
-            # # Определяем тип документа
-            
-            # keywords = {}
-            # # Извлекаем ключевые слова с помощью OpenAI
-            # logger.info(f"Extracting keywords for document type: {detected_type.value}")
-            # try:
-            #     keywords = await self.keyword_extractor.extract_keywords(content, detected_type)
-            #     logger.info(f"Extracted {len(keywords)} keywords")
-            # except Exception as e:
-            #     logger.error(f"Failed to extract keywords: {e}")
-            #     keywords = {}  # Продолжаем без ключевых слов
-            response, full_content = await self.document_parser.parse_contract(file_path)
-            detected_type = self._detect_document_type(file.filename, full_content)
-            
+            # LLM OCR parsing
+            parsed = await self.document_parser.parse_document(str(file_path))
+
+            detected_type_str = parsed.document_type.document_type if parsed and parsed.document_type else "OTHER"
+            try:
+                detected_type = DocumentType(detected_type_str)
+            except Exception:
+                detected_type = DocumentType.OTHER
+
+            # Build full content as concatenation of chunk contents
+            full_content = "\n\n".join([c.content.strip() for c in parsed.chunks if c.content])
+
+            if not full_content:
+                raise AppError(status_code=400, message="Не удалось извлечь текст из файла. Файл может быть пустым или содержать только изображения.")
+
             document = Document(
                 id=id,
                 filename=stored_filename,
@@ -337,95 +213,73 @@ class CreateDocumentInteractor:
                 file_hash=file_hash,
                 status=DocumentStatus.COMPLETED,
                 content=full_content,
-                type=detected_type,  # Добавляем определенный тип
-                keywords={},  # Добавляем извлеченные ключевые слова
+                type=detected_type,
+                keywords={},
             )
             await self.documents_repository.create(document)
-            
-            # # Если это CONTRACT/INVOICE, используем GPT; иначе Docling чанки
-            # if detected_type == DocumentType.CONTRACT:
-            #     sections = await self.contract_section_extractor.extract(content)
-            #     # Сохраняем секции в метаданные документа для дальнейшего использования/отображения
-            #     document.doc_metadata = {"contract_sections": sections}
 
-            #     # Готовим чанки как title + content, порядок важен (chunk_index)
-            #     chunks = [f"{item['title']}\n\n{item['content']}" for item in sections]
-            # elif detected_type == DocumentType.INVOICE:
-            #     fields = await self.contract_section_extractor.extract_invoice_fields(content)
-            #     # Сохраняем поля в метаданные
-            #     document.doc_metadata = {"invoice_fields": fields}
-            #     # Чанки в формате title + value для векторного поиска
-            #     chunks = [f"{item['title']}\n\n{item['value']}" for item in fields]
-            # else:
-            #     chunks = self._chunk_with_docling(dl_doc)
-            
-            chunks = [f"{item.title}\n\n{item.content}" for item in response.sections]
+            # Base metadata for all chunks
+            base_metadata = {
+                "filename": document.original_filename,
+                "content_type": file.content_type or "application/octet-stream",
+                "document_type": detected_type.value,
+                "document_id": str(document.id),
+            }
 
+            # Convert LLM chunks to Chunk dataclass with rich metadata
+            structured_chunks: List[Chunk] = []
+            for idx, ch in enumerate(parsed.chunks):
+                text = ""
+                if ch.clause:
+                    text += f"{ch.clause}\n"
+                if ch.title:
+                    text += f"{ch.title}\n\n"
+                if ch.content:
+                    text += f"{ch.content}"
+                token_count = self.document_chunker._count_tokens(text)  # reuse tokenizer for consistency
+                metadata = {
+                    **base_metadata,
+                    "section_title": ch.title,
+                    "clause": ch.clause or None,
+                    "chunk_type": "llm_clause" if ch.clause else "llm_section",
+                }
+                structured_chunks.append(Chunk(
+                    text=text,
+                    metadata=metadata,
+                    index=idx,
+                    token_count=token_count,
+                ))
+
+            logger.info(f"Created {len(structured_chunks)} LLM-structured chunks")
+
+            # Prepare embeddings
+            chunk_texts = [chunk.text for chunk in structured_chunks]
             embeddings = self.sentence_transformer.encode(
-                chunks,
+                chunk_texts,
                 convert_to_numpy=True,
                 normalize_embeddings=True,
                 show_progress_bar=False,
-                batch_size=8,
+                batch_size=16,
             )
-            
-            await self.qdrant_embeddings_repository.bulk_create_embeddings(
+
+            # Persist to Qdrant with metadata
+            await self.qdrant_embeddings_repository.bulk_create_embeddings_with_metadata(
                 collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 document_id=str(document.id),
-                chunks=chunks,  # Сохраняем БЕЗ префикса
+                chunks=structured_chunks,
                 embeddings=embeddings.tolist(),
-                # Добавляем метаданные для лучшей фильтрации
-                metadata={
-                    "filename": document.original_filename,
-                    "content_type": file.content_type,
-                    "document_type": detected_type.value,  # Добавляем тип документа
-                }
             )
-            
-            
+
             await self.uow.commit()
-            
-            print(f"✅ Docling парсинг успешен:")
-            
+            logger.info("✅ LLM parsing successful")
             return document
-            
-            
-           
+
         except Exception as e:
-            print(f"❌ Ошибка парсинга с Docling: {e}")
-            # Удаляем файл при ошибке парсинга
+            logger.error(f"LLM parsing failed: {e}")
             if file_path.exists():
                 file_path.unlink()
             raise AppError(status_code=400, message=f"Не удалось обработать файл {ext}. {str(e)}")
         
         
 
-    def _chunk_with_docling(self, docling_document: DoclingDocument) -> List[str]:
-        """
-        Разделяет контент на чанки с помощью Docling HybridChunker.
-        
-        HybridChunker:
-        1. Уважает структуру документа (не разрывает семантические блоки)
-        2. Добавляет контекст из заголовков через contextualize()
-        3. Учитывает токены, а не символы
-        4. Объединяет маленькие соседние чанки
-        
-        """
-       
-            
-        # Получаем итератор чанков
-        chunk_iter = self.docling_chunker.chunk(dl_doc=docling_document)
-        
-        # Обрабатываем чанки с контекстуализацией
-        chunks = []
-        
-        for chunk in chunk_iter:
-            
-            # КЛЮЧЕВОЙ МОМЕНТ: используем contextualize() для добавления контекста
-            # Это добавляет заголовки разделов к чанку для лучшего понимания
-            enriched_text = self.docling_chunker.contextualize(chunk=chunk)
-            
-            chunks.append(enriched_text)
-            
-        
-        return chunks
+    # Docling chunking method removed
