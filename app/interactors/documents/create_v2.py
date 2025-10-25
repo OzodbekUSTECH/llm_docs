@@ -173,7 +173,7 @@ class SimpleTokenSplitter:
                     **metadata,
                     "chunk_index": i,
                     "total_chunks": len(chunks),
-                    "source_doc_id": str(doc.doc_id),
+                    "source_doc_id": metadata.get("file_id", str(doc.doc_id)),
                 }
                 
                 chunk = DocumentSchema(
@@ -307,7 +307,9 @@ class CreateDocumentV2Interactor:
                     "original_table_text": table_doc.text,
                     "context_text": context_text,
                     "table_index": i,
-                    "total_tables": len(table_docs)
+                    "total_tables": len(table_docs),
+                    "file_id": str(file_id),
+                    "source_doc_id": str(file_id)
                 }
             )
             table_chunks.append(table_chunk)
@@ -324,15 +326,26 @@ class CreateDocumentV2Interactor:
         # Логируем разделение текста
         yield DocumentSchema(f" => Split text into {len(text_chunks)} chunks", channel="debug")
 
-        # add the thumbnails doc_id to the chunks
+        # add the thumbnails doc_id to the chunks and file_id to all chunks
         for chunk in text_chunks:
             page_label = chunk.metadata.get("page_label", None)
             if page_label and page_label in page_label_to_thumbnail:
                 chunk.metadata["thumbnail_doc_id"] = page_label_to_thumbnail[page_label]
+            # Add file_id to metadata for filtering
+            chunk.metadata["file_id"] = str(file_id)
+            chunk.metadata["source_doc_id"] = str(file_id)
 
         # ВАЖНО: Объединяем все чанки, но таблицы НЕ проходят через splitter
         # Таблицы уже обработаны отдельно в table_chunks
         all_chunks = text_chunks + table_chunks
+        
+        # Add file_id to all other documents
+        for doc in non_text_docs + thumbnail_docs:
+            if not hasattr(doc.metadata, 'get') or not doc.metadata:
+                doc.metadata = {}
+            doc.metadata["file_id"] = str(file_id)
+            doc.metadata["source_doc_id"] = str(file_id)
+        
         to_index_chunks = all_chunks + non_text_docs + thumbnail_docs
         
         # КРИТИЧЕСКИ ВАЖНО: Проверяем, что таблицы не разделились
@@ -438,8 +451,13 @@ class CreateDocumentV2Interactor:
         print(f"Getting embeddings for {len(chunks)} nodes")
         embeddings = self.embedding.invoke(chunks)
         print("Adding embeddings to vector store")
+        
+        # Extract metadata from chunks
+        metadatas = [chunk.metadata for chunk in chunks]
+        
         await self.vector_store.add(
             embeddings=embeddings,
+            metadatas=metadatas,
             ids=[str(t.doc_id) for t in chunks],
         )
         

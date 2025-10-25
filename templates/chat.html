@@ -1186,6 +1186,125 @@
             padding: 20px 0 32px;
         }
 
+        /* Document Selector Styles */
+        .document-selector {
+            background: var(--main-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 16px;
+            max-width: 768px;
+            margin: 0 auto;
+        }
+
+        .document-selector-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .document-selector-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .document-selector-toggle {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .document-selector-toggle:hover {
+            background: #0d8a6b;
+        }
+
+        .document-selector-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .document-selector-content.expanded {
+            max-height: 200px;
+        }
+
+        .document-checkboxes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .document-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            background: var(--secondary-bg);
+            border-radius: 4px;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .document-checkbox-item:hover {
+            background: var(--hover-bg);
+        }
+
+        .document-checkbox-item input[type="checkbox"] {
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .document-checkbox-item label {
+            cursor: pointer;
+            color: var(--text-primary);
+            flex: 1;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+        }
+
+        .document-action-btn {
+            background: var(--secondary-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .document-action-btn:hover {
+            background: var(--hover-bg);
+        }
+
+        .document-action-btn.primary {
+            background: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
+        }
+
+        .document-action-btn.primary:hover {
+            background: #0d8a6b;
+        }
+
         .chat-input-form {
             max-width: 768px;
             margin: 0 auto;
@@ -1425,6 +1544,29 @@
             </div>
 
             <div class="chat-input-container">
+                <!-- Document Selector -->
+                <div class="document-selector" id="document-selector">
+                    <div class="document-selector-header">
+                        <div class="document-selector-title">
+                            📚 <span>Search in specific documents</span>
+                            <span id="selected-docs-count" style="font-size: 12px; color: var(--text-secondary);">(All documents)</span>
+                        </div>
+                        <button type="button" class="document-selector-toggle" id="document-selector-toggle">
+                            <span id="toggle-text">Select</span>
+                        </button>
+                    </div>
+                    <div class="document-selector-content" id="document-selector-content">
+                        <div class="document-checkboxes" id="document-checkboxes">
+                            <!-- Documents will be loaded dynamically -->
+                        </div>
+                        <div class="document-actions">
+                            <button type="button" class="document-action-btn" id="select-all-docs">Select All</button>
+                            <button type="button" class="document-action-btn" id="deselect-all-docs">Deselect All</button>
+                            <button type="button" class="document-action-btn primary" id="apply-document-filter">Apply Filter</button>
+                        </div>
+                    </div>
+                </div>
+
                 <form class="chat-input-form" id="chat-form">
                     <div class="chat-input-wrapper">
                         <textarea 
@@ -1486,6 +1628,7 @@
                 this.currentReasoning = null;
                 this.currentToolCalls = [];
                 this.currentStreamingContent = '';
+                this.userMessageProcessed = false;
                 
                 // Streaming abort controller
                 this.abortController = null;
@@ -1494,6 +1637,11 @@
                 // Retrieved documents for info panel
                 this.retrievedDocs = [];
                 this.citationHighlights = {}; // Map: doc_rank -> excerpt
+                
+                // Document selector state
+                this.availableDocuments = [];
+                this.selectedDocuments = new Set(); // Set of document IDs
+                this.documentFilterEnabled = false;
                 
                 this.initializeElements();
                 this.bindEvents();
@@ -1517,6 +1665,14 @@
                 this.infoPanel = document.getElementById('info-panel');
                 this.infoPanelContent = document.getElementById('info-panel-content');
                 this.infoPanelToggle = document.getElementById('info-panel-toggle');
+                
+                // Document selector elements
+                this.documentSelector = document.getElementById('document-selector');
+                this.documentSelectorToggle = document.getElementById('document-selector-toggle');
+                this.documentSelectorContent = document.getElementById('document-selector-content');
+                this.documentCheckboxes = document.getElementById('document-checkboxes');
+                this.selectedDocsCount = document.getElementById('selected-docs-count');
+                this.toggleText = document.getElementById('toggle-text');
             }
 
             bindEvents() {
@@ -1539,6 +1695,23 @@
                 // Info panel toggle
                 this.infoPanelToggle.addEventListener('click', () => {
                     this.toggleInfoPanel();
+                });
+                
+                // Document selector events
+                this.documentSelectorToggle.addEventListener('click', () => {
+                    this.toggleDocumentSelector();
+                });
+                
+                document.getElementById('select-all-docs').addEventListener('click', () => {
+                    this.selectAllDocuments();
+                });
+                
+                document.getElementById('deselect-all-docs').addEventListener('click', () => {
+                    this.deselectAllDocuments();
+                });
+                
+                document.getElementById('apply-document-filter').addEventListener('click', () => {
+                    this.applyDocumentFilter();
                 });
             }
 
@@ -1606,6 +1779,9 @@
                  const message = this.messageInput.value.trim();
                  if (!message || this.isStreaming) return;
 
+                 // Полностью сбрасываем состояние сообщений
+                 this.resetMessageState();
+
                  // Если нет текущего чата, создаем новый
                  if (!this.currentChatId) {
                      await this.createNewChat();
@@ -1615,8 +1791,15 @@
                  this.messageInput.value = '';
                  this.messageInput.style.height = 'auto';
                  
-                 // Добавляем сообщение пользователя
-                 this.addUserMessage(message);
+                 // Добавляем сообщение пользователя и ждем его полного рендеринга
+                 await this.addUserMessage(message);
+                 
+                 // Дополнительная задержка для гарантии
+                 await new Promise(resolve => setTimeout(resolve, 50));
+                 
+                 // Отмечаем, что сообщение пользователя полностью обработано
+                 this.userMessageProcessed = true;
+                 
                  this.setStreaming(true);
                  
                  // Reset streaming content
@@ -1629,6 +1812,10 @@
                  this.abortController = new AbortController();
                  this.streamingChatId = this.currentChatId;
 
+                 // Debug: log selected document IDs
+                 const selectedIds = this.getSelectedDocumentIds();
+                 console.log('🔍 Selected document IDs:', selectedIds);
+
                 try {
                     const response = await fetch(`/chat/generate?chat_id=${this.currentChatId}`, {
                         method: 'POST',
@@ -1639,7 +1826,8 @@
                         signal: this.abortController.signal,
                         body: JSON.stringify({
                             message: message,
-                            stream: true
+                            stream: true,
+                            document_ids: this.getSelectedDocumentIds()
                         })
                     });
 
@@ -1696,36 +1884,66 @@
                                     if (channel === 'debug') {
                                         // Debug information
                                         console.log('[DEBUG]', content);
+                                        console.log('[DEBUG] State check - isStreaming:', this.isStreaming, 'userMessageProcessed:', this.userMessageProcessed, 'hasAssistantMessage:', !!this.currentAssistantMessage);
                                         
-                                        // Create assistant message if needed
-                                        if (!this.currentAssistantMessage) {
+                                        // Only create assistant message if we're actually streaming AND user message is processed
+                                        if (this.isStreaming && this.userMessageProcessed && !this.currentAssistantMessage) {
+                                            console.log('[DEBUG] Creating assistant message for debug');
                                             this.currentAssistantMessage = this.createAssistantMessage();
                                         }
                                         
-                                        // Create debug container if needed
-                                        if (!debugContainer) {
-                                            debugContainer = this.createDebugContainer();
-                                        }
-                                        
-                                        if (debugContainer) {
-                                            this.addDebugMessage(debugContainer, content);
+                                        // Only proceed if we have an assistant message
+                                        if (this.currentAssistantMessage) {
+                                            // Create debug container if needed
+                                            if (!debugContainer) {
+                                                debugContainer = this.createDebugContainer();
+                                            }
+                                            
+                                            if (debugContainer) {
+                                                this.addDebugMessage(debugContainer, content);
+                                            }
+                                            
+                                            // Ensure debug container stays visible
+                                            if (debugContainer && !debugContainer.classList.contains('collapsed')) {
+                                                debugContainer.style.display = 'block';
+                                            }
+                                        } else {
+                                            console.log('[DEBUG] Skipping debug message - no assistant message available');
                                         }
                                         
                                     } else if (channel === 'info') {
                                         // Document information
                                         console.log('[INFO]', content.substring(0, 100));
+                                        console.log('[INFO] State check - isStreaming:', this.isStreaming, 'userMessageProcessed:', this.userMessageProcessed, 'hasAssistantMessage:', !!this.currentAssistantMessage);
                                         
-                                        if (!this.currentAssistantMessage) {
+                                        // Only create assistant message if we're actually streaming AND user message is processed
+                                        if (this.isStreaming && this.userMessageProcessed && !this.currentAssistantMessage) {
+                                            console.log('[INFO] Creating assistant message for info');
                                             this.currentAssistantMessage = this.createAssistantMessage();
                                         }
                                         
-                                        // Add to sources section
-                                        this.addDocumentInfo(content);
+                                        // Only proceed if we have an assistant message
+                                        if (this.currentAssistantMessage) {
+                                            // Add to sources section
+                                            this.addDocumentInfo(content);
+                                        } else {
+                                            console.log('[INFO] Skipping info message - no assistant message available');
+                                        }
                                         
                                     } else if (channel === 'chat') {
                                         // Main response content
-                                        if (!this.currentAssistantMessage) {
+                                        console.log('[CHAT] State check - isStreaming:', this.isStreaming, 'userMessageProcessed:', this.userMessageProcessed, 'hasAssistantMessage:', !!this.currentAssistantMessage);
+                                        
+                                        // Only create assistant message if we're actually streaming AND user message is processed
+                                        if (this.isStreaming && this.userMessageProcessed && !this.currentAssistantMessage) {
+                                            console.log('[CHAT] Creating assistant message for chat');
                                             this.currentAssistantMessage = this.createAssistantMessage();
+                                        }
+                                        
+                                        // Only proceed if we have an assistant message
+                                        if (!this.currentAssistantMessage) {
+                                            console.log('[CHAT] Skipping chat message - no assistant message available');
+                                            return;
                                         }
                                         
                                              // Accumulate streaming content
@@ -1733,9 +1951,20 @@
                                              const streamingDiv = this.currentAssistantMessage.querySelector('.message-text');
                                         
                                              if (streamingDiv) {
+                                                 // Preserve debug container before updating content
+                                                 const debugContainer = this.currentAssistantMessage.querySelector('.debug-section');
+                                                 
                                                  // Add streaming cursor
                                                  const contentWithCursor = this.currentStreamingContent + '<span class="streaming-cursor">▊</span>';
                                                  streamingDiv.innerHTML = this.parseMarkdown(contentWithCursor);
+                                                 
+                                                 // Restore debug container if it existed
+                                                 if (debugContainer) {
+                                                     const messageContent = this.currentAssistantMessage.querySelector('.message-content');
+                                                     if (messageContent && !messageContent.querySelector('.debug-section')) {
+                                                         messageContent.insertBefore(debugContainer, messageContent.firstChild);
+                                                     }
+                                                 }
                                                  
                                                  // Throttle code highlighting to improve performance
                                                  if (!this.highlightTimeout) {
@@ -1782,8 +2011,20 @@
                                              const contentDiv = this.currentAssistantMessage?.querySelector('.message-text');
                                              
                                              if (contentDiv) {
-                                            const finalContent = this.currentStreamingContent;
+                                                 // Preserve debug container before updating final content
+                                                 const debugContainer = this.currentAssistantMessage.querySelector('.debug-section');
+                                                 
+                                                 const finalContent = this.currentStreamingContent;
                                                  contentDiv.innerHTML = this.parseMarkdown(finalContent);
+                                                 
+                                                 // Restore debug container if it existed
+                                                 if (debugContainer) {
+                                                     const messageContent = this.currentAssistantMessage.querySelector('.message-content');
+                                                     if (messageContent && !messageContent.querySelector('.debug-section')) {
+                                                         messageContent.insertBefore(debugContainer, messageContent.firstChild);
+                                                     }
+                                                 }
+                                                 
                                                  this.highlightCodeBlocks(contentDiv);
                                         }
                                              
@@ -1885,6 +2126,16 @@
                 
                 this.chatMessages.appendChild(messageGroup);
                 this.scrollToBottom();
+                
+                // Return a promise that resolves when the message is fully rendered
+                return new Promise(resolve => {
+                    // Use requestAnimationFrame to ensure DOM is updated
+                    requestAnimationFrame(() => {
+                        // Force a reflow to ensure the message is visible
+                        messageGroup.offsetHeight;
+                        resolve();
+                    });
+                });
             }
 
             addAssistantMessage(content) {
@@ -2342,6 +2593,17 @@
                 this.sendButton.disabled = streaming;
                 this.typingIndicator.classList.toggle('show', streaming);
             }
+            
+            resetMessageState() {
+                // Reset all message-related state variables
+                this.currentAssistantMessage = null;
+                this.currentStreamingContent = '';
+                this.userMessageProcessed = false;
+                this.currentReasoning = null;
+                this.currentToolCalls = [];
+                this.retrievedDocs = [];
+                this.citationHighlights = {};
+            }
 
             scrollToBottom() {
                 this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
@@ -2464,9 +2726,7 @@
                 
                 // Очищаем состояние
                 this.setStreaming(false);
-                this.currentAssistantMessage = null;
-                this.currentToolCalls = [];
-                this.currentStreamingContent = '';
+                this.resetMessageState();
                 
                 this.currentChatId = chatId;
                 console.log('Switched to chat:', chatId);
@@ -2635,9 +2895,18 @@
                 if (!this.currentAssistantMessage) return null;
                 
                 const messageContent = this.currentAssistantMessage.querySelector('.message-content');
-                const debugSection = document.createElement('div');
+                if (!messageContent) return null;
+                
+                // Check if debug container already exists
+                let debugSection = messageContent.querySelector('.debug-section');
+                if (debugSection) {
+                    return debugSection;
+                }
+                
+                debugSection = document.createElement('div');
                 debugSection.className = 'collapsible-section debug-section';
                 debugSection.style.marginBottom = '12px';
+                debugSection.style.display = 'block'; // Ensure it's visible by default
                 
                 debugSection.innerHTML = `
                     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
@@ -3109,6 +3378,123 @@
                 } else {
                     console.log(`[CITATION] No evidences found for doc ${citationNumber}`);
                 }
+            }
+
+            // Document Selector Methods
+            async loadAvailableDocuments() {
+                try {
+                    const response = await fetch('/documents?page=1&size=100', {
+                        credentials: 'include'
+                    });
+                    if (!response.ok) throw new Error('Failed to load documents');
+                    
+                    const data = await response.json();
+                    this.availableDocuments = data.items || [];
+                    this.renderDocumentCheckboxes();
+                } catch (error) {
+                    console.error('Error loading documents:', error);
+                    this.availableDocuments = [];
+                }
+            }
+
+            renderDocumentCheckboxes() {
+                if (!this.documentCheckboxes) return;
+                
+                this.documentCheckboxes.innerHTML = '';
+                
+                this.availableDocuments.forEach(doc => {
+                    const checkboxItem = document.createElement('div');
+                    checkboxItem.className = 'document-checkbox-item';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `doc-${doc.id}`;
+                    checkbox.value = doc.id;
+                    checkbox.checked = this.selectedDocuments.has(doc.id);
+                    
+                    const label = document.createElement('label');
+                    label.htmlFor = `doc-${doc.id}`;
+                    label.textContent = doc.name || `Document ${doc.id}`;
+                    
+                    checkboxItem.appendChild(checkbox);
+                    checkboxItem.appendChild(label);
+                    this.documentCheckboxes.appendChild(checkboxItem);
+                    
+                    // Add change event listener
+                    checkbox.addEventListener('change', (e) => {
+                        if (e.target.checked) {
+                            this.selectedDocuments.add(doc.id);
+                        } else {
+                            this.selectedDocuments.delete(doc.id);
+                        }
+                        this.updateSelectedDocsCount();
+                    });
+                });
+            }
+
+            toggleDocumentSelector() {
+                const isExpanded = this.documentSelectorContent.classList.contains('expanded');
+                
+                if (isExpanded) {
+                    this.documentSelectorContent.classList.remove('expanded');
+                    this.toggleText.textContent = 'Select';
+                } else {
+                    this.documentSelectorContent.classList.add('expanded');
+                    this.toggleText.textContent = 'Hide';
+                    
+                    // Load documents if not already loaded
+                    if (this.availableDocuments.length === 0) {
+                        this.loadAvailableDocuments();
+                    }
+                }
+            }
+
+            selectAllDocuments() {
+                this.selectedDocuments.clear();
+                this.availableDocuments.forEach(doc => {
+                    this.selectedDocuments.add(doc.id);
+                });
+                this.updateDocumentCheckboxes();
+                this.updateSelectedDocsCount();
+            }
+
+            deselectAllDocuments() {
+                this.selectedDocuments.clear();
+                this.updateDocumentCheckboxes();
+                this.updateSelectedDocsCount();
+            }
+
+            updateDocumentCheckboxes() {
+                const checkboxes = this.documentCheckboxes.querySelectorAll('input[type="checkbox"]');
+                checkboxes.forEach(checkbox => {
+                    checkbox.checked = this.selectedDocuments.has(checkbox.value);
+                });
+            }
+
+            updateSelectedDocsCount() {
+                if (this.selectedDocuments.size === 0) {
+                    this.selectedDocsCount.textContent = '(All documents)';
+                    this.documentFilterEnabled = false;
+                } else {
+                    this.selectedDocsCount.textContent = `(${this.selectedDocuments.size} selected)`;
+                    this.documentFilterEnabled = true;
+                }
+            }
+
+            applyDocumentFilter() {
+                this.documentFilterEnabled = this.selectedDocuments.size > 0;
+                this.toggleDocumentSelector(); // Hide the selector
+                
+                // Show a message about the filter
+                if (this.documentFilterEnabled) {
+                    this.addAssistantMessage(`🔍 Document filter applied: Searching in ${this.selectedDocuments.size} selected document(s).`);
+                } else {
+                    this.addAssistantMessage(`🔍 Document filter cleared: Searching in all documents.`);
+                }
+            }
+
+            getSelectedDocumentIds() {
+                return this.documentFilterEnabled ? Array.from(this.selectedDocuments) : null;
             }
 
         }

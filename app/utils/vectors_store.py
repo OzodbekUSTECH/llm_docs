@@ -130,7 +130,7 @@ class QdrantVectorStore:
             query_filter = Filter(
                 must=[
                     models.FieldCondition(
-                        key="id",
+                        key="metadata.file_id",
                         match=models.MatchAny(any=ids)
                     )
                 ]

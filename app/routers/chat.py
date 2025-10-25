@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID
 from fastapi import APIRouter, status, HTTPException, Query
 from dishka.integrations.fastapi import FromDishka, DishkaRoute
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
@@ -21,9 +21,15 @@ router = APIRouter(
 )
 
 
-async def stream_generator(interactor: GenerateAnswerInteractor, message: str, chat_id: str):
+async def stream_generator(interactor: GenerateAnswerInteractor, message: str, chat_id: str, document_ids: Optional[List[str]] = None):
     """Generator for streaming response in SSE format"""
     try:
+        # Debug: log document_ids
+        if document_ids:
+            print(f"🔍 Backend: Filtering by document IDs: {document_ids}")
+        else:
+            print(f"🔍 Backend: Searching in all documents")
+            
         # Get chat history
         history = chat_storage.get_messages(chat_id)
         
@@ -31,7 +37,8 @@ async def stream_generator(interactor: GenerateAnswerInteractor, message: str, c
             message=message,
             conv_id=chat_id,
             history=history,
-            top_k=5
+            top_k=5,
+            document_ids=document_ids
         ):
             # Format as Server-Sent Events
             event_data = {
@@ -81,7 +88,7 @@ async def generate_answer(
     
     if request.stream:
         return StreamingResponse(
-            stream_generator(generate_answer_interactor, request.message, chat_id),
+            stream_generator(generate_answer_interactor, request.message, chat_id, request.document_ids),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

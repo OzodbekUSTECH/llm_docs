@@ -349,15 +349,17 @@ class GenerateAnswerInteractor:
         self.temperature = 0.3
         self.use_reranking = True
         self.use_keyword_search = True
+        self.use_semantic_search = True  # Enable semantic search by default
 
     async def keyword_search_lancedb(
         self,
         query: str,
-        top_k: int = 15
+        top_k: int = 15,
+        document_ids: Optional[List[str]] = None
     ) -> List[tuple[str, float]]:
         """Keyword search using LanceDB Full-Text Search (Tantivy)"""
         try:
-            fts_results = self.doc_store.query(query, top_k=top_k)
+            fts_results = self.doc_store.query(query, top_k=top_k, doc_ids=document_ids)
             logger.info(f"🔤 LanceDB FTS found {len(fts_results)} results")
             results = []
             for i, doc in enumerate(fts_results):
@@ -381,59 +383,116 @@ class GenerateAnswerInteractor:
         score_threshold: float = 0.5,
         semantic_weight: float = 0.7,
         keyword_weight: float = 0.3,
+        document_ids: Optional[List[str]] = None,
     ) -> List[RetrievedDocument]:
         """Retrieve relevant documents using Hybrid Search (Semantic + Keyword) + Reranking"""
         try:
-            logger.info(f"🔍 Step 1: Semantic search for: {query[:100]}...")
-            query_embedding_docs = self.embedding.invoke(query)
-            if not query_embedding_docs or not getattr(query_embedding_docs[0], "embedding", None):
-                logger.error("Failed to create query embedding")
-                return []
-            query_embedding = query_embedding_docs[0].embedding
-            initial_k = top_k * 3 if self.use_keyword_search or self.use_reranking else top_k * 2
-            embeddings, similarities, doc_ids = await self.vector_store.query(
-                embedding=query_embedding,
-                top_k=initial_k,
-            )
-            if not doc_ids:
-                logger.warning("No documents found in vector search")
-                return []
-            logger.info(f"✅ Semantic search: found {len(doc_ids)} documents")
+            if document_ids:
+                logger.info(f"🔍 Filtering search by document IDs: {document_ids}")
+            else:
+                logger.info(f"🔍 Searching in all documents")
+            
+            # Initialize results
+            semantic_docs = []
+            keyword_docs = []
+            all_doc_ids = set()
+            
+            # Step 1: Semantic Search (Qdrant) - INDEPENDENT
+            if self.use_semantic_search:
+                try:
+                    logger.info(f"🔍 Step 1: Semantic search for: {query[:100]}...")
+                    query_embedding_docs = self.embedding.invoke(query)
+                    if query_embedding_docs and getattr(query_embedding_docs[0], "embedding", None):
+                        query_embedding = query_embedding_docs[0].embedding
+                        initial_k = top_k * 3 if self.use_keyword_search or self.use_reranking else top_k * 2
+                        embeddings, similarities, doc_ids = await self.vector_store.query(
+                            embedding=query_embedding,
+                            top_k=initial_k,
+                            ids=document_ids,
+                        )
+                        if doc_ids:
+                            logger.info(f"✅ Semantic search: found {len(doc_ids)} documents")
+                            semantic_docs = list(zip(doc_ids, similarities))
+                            all_doc_ids.update(doc_ids)
+                        else:
+                            logger.warning("⚠️ No documents found in semantic search")
+                    else:
+                        logger.error("❌ Failed to create query embedding")
+                except Exception as e:
+                    logger.error(f"❌ Error in semantic search: {e}")
+            else:
+                logger.info("🔍 Semantic search disabled")
+            
+            # Step 2: Keyword Search (LanceDB) - INDEPENDENT
             keyword_scores_dict = {}
-            all_doc_ids = set(doc_ids)
             if self.use_keyword_search:
-                logger.info(f"🔤 Step 2: LanceDB Full-Text Search...")
-                fts_results = await self.keyword_search_lancedb(query, top_k=initial_k)
-                for fts_doc_id, fts_score in fts_results:
-                    keyword_scores_dict[fts_doc_id] = fts_score
-                    all_doc_ids.add(fts_doc_id)
-                logger.info(f"✅ FTS found {len(fts_results)} documents")
-            logger.info(f"📚 Retrieving {len(all_doc_ids)} unique documents from LanceDB...")
-            all_docs = self.doc_store.get(list(all_doc_ids))
-            # fix: allow LanceDB docs to have either id_ or doc_id
-            doc_dict = {}
-            for doc in all_docs:
-                doc_id = getattr(doc, "id_", None)
-                if doc_id is None:
-                    doc_id = getattr(doc, "doc_id", None)
-                if doc_id is not None:
-                    doc_dict[doc_id] = doc
-            semantic_scores_dict = dict(zip(doc_ids, similarities))
+                try:
+                    logger.info(f"🔤 Step 2: LanceDB Full-Text Search...")
+                    fts_results = await self.keyword_search_lancedb(query, top_k=initial_k, document_ids=document_ids)
+                    if fts_results:
+                        logger.info(f"✅ FTS found {len(fts_results)} documents")
+                        keyword_docs = fts_results
+                        for fts_doc_id, fts_score in fts_results:
+                            keyword_scores_dict[fts_doc_id] = fts_score
+                            all_doc_ids.add(fts_doc_id)
+                    else:
+                        logger.warning("⚠️ No documents found in keyword search")
+                except Exception as e:
+                    logger.error(f"❌ Error in keyword search: {e}")
+            
+            # Check if we have any results from either search
+            if not all_doc_ids:
+                logger.warning("❌ No documents found in any search method")
+                return []
+            
+            # Step 3: Retrieve full documents from LanceDB - INDEPENDENT
+            try:
+                logger.info(f"📚 Retrieving {len(all_doc_ids)} unique documents from LanceDB...")
+                all_docs = self.doc_store.get(list(all_doc_ids))
+                doc_dict = {}
+                for doc in all_docs:
+                    doc_id = getattr(doc, "id_", None)
+                    if doc_id is None:
+                        doc_id = getattr(doc, "doc_id", None)
+                    if doc_id is not None:
+                        doc_dict[doc_id] = doc
+                logger.info(f"✅ Retrieved {len(doc_dict)} documents from LanceDB")
+            except Exception as e:
+                logger.error(f"❌ Error retrieving documents from LanceDB: {e}")
+                return []
+            
+            # Step 4: Combine results from both searches
+            semantic_scores_dict = dict(semantic_docs)
             retrieved_docs = []
+            
             for doc_id in all_doc_ids:
                 if doc_id not in doc_dict:
+                    logger.warning(f"⚠️ Document {doc_id} not found in LanceDB")
                     continue
+                    
                 doc = doc_dict[doc_id]
                 semantic_score = semantic_scores_dict.get(doc_id, 0.0)
                 keyword_score = keyword_scores_dict.get(doc_id, 0.0)
-                if self.use_keyword_search:
+                
+                # Calculate combined score based on available search methods
+                if semantic_score > 0 and keyword_score > 0:
+                    # Both searches found this document - use weighted combination
                     combined_score = semantic_weight * semantic_score + keyword_weight * keyword_score
-                else:
+                elif semantic_score > 0:
+                    # Only semantic search found this document
                     combined_score = semantic_score
-                # fix: doc may have text or content or both
+                elif keyword_score > 0:
+                    # Only keyword search found this document
+                    combined_score = keyword_score
+                else:
+                    # Fallback (shouldn't happen)
+                    combined_score = 0.0
+                
+                # Get document content and metadata
                 doc_content = getattr(doc, "text", None) or getattr(doc, "content", None) or ""
                 doc_metadata = getattr(doc, "metadata", None) or {}
                 doc_docid = getattr(doc, "doc_id", None)
+                
                 retrieved_doc = RetrievedDocument(
                     content=doc_content,
                     metadata=doc_metadata,
@@ -443,26 +502,39 @@ class GenerateAnswerInteractor:
                     keyword_score=float(keyword_score),
                 )
                 retrieved_docs.append(retrieved_doc)
+            
+            # Sort by combined score
             retrieved_docs.sort(key=lambda x: x.score, reverse=True)
-            if self.use_keyword_search and retrieved_docs:
+            
+            # Log statistics
+            if retrieved_docs:
                 avg_semantic = sum(d.semantic_score for d in retrieved_docs) / len(retrieved_docs)
                 avg_keyword = sum(d.keyword_score for d in retrieved_docs) / len(retrieved_docs)
                 logger.info(f"✅ Hybrid scores: semantic={avg_semantic:.3f}, keyword={avg_keyword:.3f}")
+            
+            # Apply score threshold
             filtered_docs = [doc for doc in retrieved_docs if doc.score >= score_threshold]
             if not filtered_docs:
                 logger.warning(f"⚠️ No documents above threshold {score_threshold}")
                 filtered_docs = retrieved_docs[:top_k]
             logger.info(f"✅ After filtering: {len(filtered_docs)} documents")
+            
+            # Step 5: LLM Reranking (if enabled)
             max_llm_score = 10.0
             if self.use_reranking and len(filtered_docs) > top_k:
-                logger.info(f"🔄 Step 3: LLM-based reranking (Kotaemon-style)...")
-                reranked_docs, max_llm_score = await self.reranker.rerank(query, filtered_docs, top_k)
-                logger.info(f"✅ Reranked to {len(reranked_docs)} documents | Max LLM score: {max_llm_score:.1f}/10")
-                filtered_docs = reranked_docs
+                try:
+                    logger.info(f"🔄 Step 3: LLM-based reranking (Kotaemon-style)...")
+                    reranked_docs, max_llm_score = await self.reranker.rerank(query, filtered_docs, top_k)
+                    logger.info(f"✅ Reranked to {len(reranked_docs)} documents | Max LLM score: {max_llm_score:.1f}/10")
+                    filtered_docs = reranked_docs
+                except Exception as e:
+                    logger.error(f"❌ Error in reranking: {e}")
+            
             final_docs = filtered_docs[:top_k]
             self._last_max_llm_score = max_llm_score
             logger.info(f"✅ Final result: {len(final_docs)} documents")
             return final_docs
+            
         except Exception as e:
             logger.error(f"❌ Error in retrieve_documents: {e}", exc_info=True)
             return []
@@ -504,6 +576,7 @@ class GenerateAnswerInteractor:
         conv_id: str,
         history: Optional[List[Dict]] = None,
         top_k: int = 5,
+        document_ids: Optional[List[str]] = None,
         **kwargs
     ) -> AsyncGenerator[DocumentSchema, None]:
         """
@@ -512,14 +585,22 @@ class GenerateAnswerInteractor:
         start_time = time.time()
         history = history or []
         try:
-            search_mode = "Hybrid Search (Qdrant + LanceDB FTS)" if self.use_keyword_search else "Semantic Search (Qdrant)"
+            if self.use_semantic_search and self.use_keyword_search:
+                search_mode = "Hybrid Search (Qdrant + LanceDB FTS)"
+            elif self.use_semantic_search:
+                search_mode = "Semantic Search (Qdrant only)"
+            elif self.use_keyword_search:
+                search_mode = "Keyword Search (LanceDB FTS only)"
+            else:
+                search_mode = "No search enabled"
             yield DocumentSchema(
                 content=f"🔍 Starting {search_mode}...",
                 channel="debug"
             )
             retrieved_docs = await self.retrieve_documents(
                 query=message,
-                top_k=top_k
+                top_k=top_k,
+                document_ids=document_ids
             )
             if not retrieved_docs:
                 yield DocumentSchema(

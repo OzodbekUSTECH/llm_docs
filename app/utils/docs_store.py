@@ -77,6 +77,8 @@ class LanceDBDocumentStore:
         if doc_ids:
             id_filter = ", ".join([f"'{_id}'" for _id in doc_ids])
             query_filter = f"id in ({id_filter})"
+            # query_filter = f"JSON_EXTRACT(attributes, '$.source_doc_id') in ({id_filter})"
+            #
         else:
             query_filter = None
         try:

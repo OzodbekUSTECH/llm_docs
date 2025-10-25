@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class GenerateAnswerRequest(BaseModel):
     message: str
     stream: bool = False
+    document_ids: Optional[List[str]] = None
 
 
 class ToolCall(BaseModel):
