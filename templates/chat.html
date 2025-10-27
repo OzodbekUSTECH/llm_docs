@@ -3392,7 +3392,11 @@
                 try {
                     // Use window.location.origin to ensure HTTPS protocol
                     const baseUrl = window.location.origin;
-                    const response = await fetch(`${baseUrl}/documents?page=1&size=100`, {
+                    const fullUrl = `${baseUrl}/documents?page=1&size=100`;
+                    console.log('Loading documents from:', fullUrl);
+                    console.log('Current protocol:', window.location.protocol);
+                    
+                    const response = await fetch(fullUrl, {
                         credentials: 'include'
                     });
                     if (!response.ok) throw new Error('Failed to load documents');
