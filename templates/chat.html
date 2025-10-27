@@ -3390,22 +3390,45 @@
             // Document Selector Methods
             async loadAvailableDocuments() {
                 try {
-                    // Use window.location.origin to ensure HTTPS protocol
-                    const baseUrl = window.location.origin;
-                    const fullUrl = `${baseUrl}/documents?page=1&size=100`;
-                    console.log('Loading documents from:', fullUrl);
-                    console.log('Current protocol:', window.location.protocol);
+                    // Use absolute URL construction to avoid service worker/proxy rewriting
+                    const protocol = window.location.protocol;
+                    const host = window.location.host;
+                    const fullUrl = `${protocol}//${host}/documents?page=1&size=100`;
+                    console.log('[LOAD DOCS] Full URL:', fullUrl);
+                    console.log('[LOAD DOCS] Protocol:', protocol);
+                    console.log('[LOAD DOCS] Host:', host);
+                    console.log('[LOAD DOCS] Origin:', window.location.origin);
+                    
+                    // Direct fetch with absolute URL - bypass any service workers or proxies
+                    console.log('[LOAD DOCS] Making direct fetch request');
                     
                     const response = await fetch(fullUrl, {
-                        credentials: 'include'
+                        method: 'GET',
+                        credentials: 'include',
+                        cache: 'no-store',
+                        mode: 'cors',
+                        redirect: 'follow',
+                        headers: {
+                            'Accept': 'application/json',
+                        }
                     });
+                    
+                    console.log('[LOAD DOCS] Response status:', response.status);
+                    console.log('[LOAD DOCS] Response URL:', response.url);
+                    
                     if (!response.ok) throw new Error('Failed to load documents');
                     
                     const data = await response.json();
                     this.availableDocuments = data.items || [];
                     this.renderDocumentCheckboxes();
+                    console.log('[LOAD DOCS] Loaded', this.availableDocuments.length, 'documents');
                 } catch (error) {
-                    console.error('Error loading documents:', error);
+                    console.error('[LOAD DOCS] Error loading documents:', error);
+                    console.error('[LOAD DOCS] Error details:', {
+                        name: error.name,
+                        message: error.message,
+                        stack: error.stack
+                    });
                     this.availableDocuments = [];
                 }
             }
