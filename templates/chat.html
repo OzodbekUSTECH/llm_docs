@@ -1817,7 +1817,8 @@
                  console.log('🔍 Selected document IDs:', selectedIds);
 
                 try {
-                    const response = await fetch(`/chat/generate?chat_id=${this.currentChatId}`, {
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/generate?chat_id=${this.currentChatId}`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -2618,7 +2619,8 @@
              async testConnection() {
                  console.log('Testing connection...');
                  try {
-                     const response = await fetch('/chat/generate?chat_id=test-123', {
+                     const baseUrl = window.location.origin;
+                     const response = await fetch(`${baseUrl}/chat/generate?chat_id=test-123`, {
                          method: 'POST',
                          headers: {
                              'Content-Type': 'application/json',
@@ -2674,7 +2676,8 @@
             async loadChats() {
                 try {
                     console.log('[LOAD] Fetching chats from /chat/chats');
-                    const response = await fetch('/chat/chats', {
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/chats`, {
                         credentials: 'include'
                     });
                     console.log('[LOAD] Response status:', response.status);
@@ -2693,7 +2696,8 @@
 
             async createNewChat() {
                 try {
-                    const response = await fetch('/chat/chats?title=New Chat', {
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/chats?title=New Chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include'
@@ -2736,7 +2740,8 @@
                 
                 try {
                     // Загружаем сообщения чата
-                    const response = await fetch(`/chat/chats/${chatId}`, {
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/chats/${chatId}`, {
                         credentials: 'include'
                     });
                     if (!response.ok) throw new Error('Failed to load chat');
@@ -2786,7 +2791,8 @@
                 if (!confirm('Delete this chat?')) return;
                 
                 try {
-                    const response = await fetch(`/chat/chats/${chatId}`, {
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/chats/${chatId}`, {
                         method: 'DELETE',
                         credentials: 'include'
                     });
@@ -2876,7 +2882,8 @@
             // Обновление чата после получения названия
             async refreshChatTitle(chatId) {
                 try {
-                    const response = await fetch(`/chat/chats/${chatId}`);
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/chat/chats/${chatId}`);
                     if (!response.ok) return;
                     
                     const chat = await response.json();
@@ -3383,7 +3390,9 @@
             // Document Selector Methods
             async loadAvailableDocuments() {
                 try {
-                    const response = await fetch('/documents?page=1&size=100', {
+                    // Use window.location.origin to ensure HTTPS protocol
+                    const baseUrl = window.location.origin;
+                    const response = await fetch(`${baseUrl}/documents?page=1&size=100`, {
                         credentials: 'include'
                     });
                     if (!response.ok) throw new Error('Failed to load documents');
@@ -3511,7 +3520,8 @@
                 
                 if (confirm('Вы уверены, что хотите выйти?')) {
                     try {
-                        await fetch('/auth/logout', {
+                        const baseUrl = window.location.origin;
+                        await fetch(`${baseUrl}/auth/logout`, {
                             method: 'POST',
                             credentials: 'include'
                         });
