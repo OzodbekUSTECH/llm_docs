@@ -330,8 +330,729 @@ Relevance score (0-10):"""
         return top_docs, max_llm_score
 
 
+class QueryRephraser:
+    """
+    Класс для интеллектуального перефразирования запросов с помощью LLM.
+    
+    Анализирует найденные документы и определяет недостающую информацию,
+    чтобы сгенерировать новые запросы для поиска пропущенных данных.
+    """
+    
+    def __init__(self, openai_client: AsyncOpenAI):
+        self.client = openai_client
+    
+    async def analyze_and_find_missing_info(
+        self,
+        original_query: str,
+        found_documents: List[RetrievedDocument],
+        max_iterations: int = 3
+    ) -> List[str]:
+        """Анализирует найденные документы и определяет недостающую информацию"""
+        try:
+            logger.info(f"🔍 Analyzing found documents to identify missing information...")
+            
+            # Проверяем, есть ли вообще релевантные документы
+            relevant_docs = [doc for doc in found_documents if doc.score > 0.3]
+            if not relevant_docs:
+                logger.warning("⚠️ No relevant documents found, generating broad search queries")
+                return await self._generate_broad_search_queries(original_query, max_iterations)
+            
+            # Анализируем содержимое найденных документов
+            found_content = "\n\n".join([
+                f"[Document {i+1}] Score: {doc.score:.3f}\nContent: {doc.content[:300]}..."
+                for i, doc in enumerate(relevant_docs[:5])
+            ])
+            
+            # Формируем prompt для анализа
+            analysis_prompt = f"""Analyze the following user question and the documents that were found.
+
+USER QUESTION: {original_query}
+
+FOUND DOCUMENTS:
+{found_content}
+
+Your task:
+1. Identify which specific parts/aspects of the question are NOT adequately answered by the found documents
+2. Generate {max_iterations-1} new search queries that target the MISSING information
+3. Focus on aspects that are clearly NOT covered in the existing documents
+4. If the documents don't contain relevant information, generate broader search queries
+
+IMPORTANT:
+- Each new query should target DIFFERENT missing information
+- Use different keywords and phrases from the original query
+- Be specific about what information is missing
+- If no relevant info found, try broader terms and synonyms
+- Return ONLY a JSON object with format: {{"missing_info": ["query1", "query2", "query3"]}}
+
+Return the missing information as search queries:"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at analyzing search results to identify missing information. You help refine search queries to find specific information gaps."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=400,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            try:
+                parsed = json.loads(result_text)
+                missing_queries = parsed.get("missing_info", [])
+                
+                # Возвращаем оригинальный запрос + запросы для недостающей информации
+                all_queries = [original_query] + missing_queries[:max_iterations-1]
+                logger.info(f"✅ Identified {len(missing_queries)} areas of missing information")
+                logger.info(f"   Generated {len(all_queries)} total search queries")
+                
+                return all_queries
+                
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"⚠️ Could not parse missing info analysis: {e}")
+                # Fallback: используем простые вариации
+                return await self._generate_simple_variations(original_query, max_iterations)
+                
+        except Exception as e:
+            logger.error(f"❌ Error analyzing missing information: {e}")
+            # Fallback: используем простые вариации
+            return await self._generate_simple_variations(original_query, max_iterations)
+    
+    async def _generate_simple_variations(
+        self,
+        original_query: str,
+        max_iterations: int = 3
+    ) -> List[str]:
+        """Генерирует простые вариации запроса (fallback метод)"""
+        try:
+            logger.info(f"🔄 Generating simple query variations for: {original_query[:100]}...")
+            
+            prompt = f"""Given the following user question, generate {max_iterations-1} different ways to ask the same question. Each variation should:
+1. Use different keywords and phrases
+2. Focus on different aspects of the question
+3. Use synonyms and alternative expressions
+4. Maintain the same core meaning
+
+Original question: {original_query}
+
+Return ONLY a JSON object with format: {{"variations": ["query1", "query2", "query3"]}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a query rephrasing expert. Generate diverse but semantically equivalent variations of user questions."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=300,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            parsed = json.loads(result_text)
+            variations = parsed.get("variations", [])
+            
+            all_queries = [original_query] + variations[:max_iterations-1]
+            logger.info(f"✅ Generated {len(all_queries)} query variations")
+            return all_queries
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating simple variations: {e}")
+            return [original_query]
+    
+    async def _generate_broad_search_queries(
+        self,
+        original_query: str,
+        max_iterations: int = 3
+    ) -> List[str]:
+        """Генерирует широкие поисковые запросы когда релевантные документы не найдены"""
+        try:
+            logger.info(f"🔄 Generating broad search queries for: {original_query[:100]}...")
+            
+            prompt = f"""The user asked: "{original_query}"
+
+No relevant documents were found for this query. Generate {max_iterations-1} broad search queries that might help find related information. Use:
+
+1. Broader terms and synonyms
+2. Related concepts and topics
+3. Different ways to express the same question
+4. General terms instead of specific ones
+
+Examples:
+- If asking about "price clause", try "pricing", "cost", "payment terms", "financial terms"
+- If asking about "Glencore contract", try "agreement", "document", "terms", "conditions"
+
+Return ONLY a JSON object with format: {{"broad_queries": ["query1", "query2", "query3"]}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at generating broad search queries when specific information is not found. You help expand search terms to find related information."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,
+                max_tokens=300,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            parsed = json.loads(result_text)
+            broad_queries = parsed.get("broad_queries", [])
+            
+            all_queries = [original_query] + broad_queries[:max_iterations-1]
+            logger.info(f"✅ Generated {len(all_queries)} broad search queries")
+            return all_queries
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating broad search queries: {e}")
+            return [original_query]
+    
+    async def decompose_complex_query(
+        self,
+        query: str,
+        max_subqueries: int = 3
+    ) -> List[str]:
+        """
+        Разбивает сложный вопрос на несколько простых подвопросов.
+        Это полезно когда один вопрос содержит несколько аспектов.
+        """
+        try:
+            logger.info(f"🔍 Decomposing complex query into sub-queries: {query[:100]}...")
+            
+            prompt = f"""The user asked a complex question that might contain multiple aspects or sub-questions.
+
+Original Question: {query}
+
+Your task:
+1. Analyze if this question can be broken down into {max_subqueries} simpler sub-questions
+2. Each sub-question should target ONE specific aspect or piece of information
+3. The sub-questions together should cover all aspects of the original question
+4. If the question is already simple, return variations of it
+
+Examples:
+- "What is the price and payment terms?" → ["What is the price?", "What are the payment terms?"]
+- "How does the contract define delivery and warranty?" → ["How does the contract define delivery?", "What are the warranty terms?"]
+
+Return ONLY a JSON object with format: {{"sub_queries": ["query1", "query2", "query3"]}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at breaking down complex questions into simpler sub-questions. Each sub-question should be independently searchable."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5,
+                max_tokens=300,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            parsed = json.loads(result_text)
+            sub_queries = parsed.get("sub_queries", [])
+            
+            logger.info(f"✅ Decomposed into {len(sub_queries)} sub-queries")
+            return sub_queries[:max_subqueries]
+                
+        except Exception as e:
+            logger.error(f"❌ Error decomposing query: {e}")
+            return [query]
+    
+    async def extract_key_entities(
+        self,
+        query: str
+    ) -> Dict[str, List[str]]:
+        """
+        Извлекает ключевые сущности из вопроса для таргетированного поиска.
+        
+        Returns:
+            dict with keys:
+            - entities: List[str] - имена, компании, даты и т.д.
+            - concepts: List[str] - ключевые концепты и термины
+            - actions: List[str] - действия или процессы
+        """
+        try:
+            logger.info(f"🔍 Extracting key entities from query: {query[:100]}...")
+            
+            prompt = f"""Extract key information from this search query to help improve document search.
+
+Query: {query}
+
+Extract:
+1. **Entities**: Names, companies, dates, locations, specific terms (e.g., "Glencore", "contract", "2023")
+2. **Concepts**: Key concepts and topics (e.g., "pricing", "payment terms", "delivery")
+3. **Actions**: Actions or processes mentioned (e.g., "define", "calculate", "determine")
+
+Return ONLY a JSON object with format:
+{{
+    "entities": ["entity1", "entity2"],
+    "concepts": ["concept1", "concept2"],
+    "actions": ["action1", "action2"]
+}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an NLP expert specializing in entity extraction and query analysis."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            entities_data = json.loads(result_text)
+            
+            logger.info(f"✅ Extracted entities: {len(entities_data.get('entities', []))} entities, "
+                       f"{len(entities_data.get('concepts', []))} concepts, "
+                       f"{len(entities_data.get('actions', []))} actions")
+            
+            return entities_data
+                
+        except Exception as e:
+            logger.error(f"❌ Error extracting entities: {e}")
+            return {
+                "entities": [],
+                "concepts": [],
+                "actions": []
+            }
+    
+    async def generate_targeted_queries(
+        self,
+        original_query: str,
+        entities: Dict[str, List[str]],
+        max_queries: int = 3
+    ) -> List[str]:
+        """
+        Генерирует таргетированные запросы на основе извлеченных сущностей.
+        Фокусируется на конкретных аспектах вопроса.
+        """
+        try:
+            logger.info(f"🔍 Generating targeted queries based on entities...")
+            
+            entities_str = json.dumps(entities, indent=2)
+            
+            prompt = f"""Generate {max_queries} targeted search queries based on the original question and extracted entities.
+
+Original Question: {original_query}
+
+Extracted Information:
+{entities_str}
+
+Your task:
+1. Create {max_queries} different search queries
+2. Each query should focus on a specific aspect using the extracted entities and concepts
+3. Combine entities with concepts in different ways
+4. Use natural language that would match document content
+
+Examples:
+- If entities=["Glencore"] and concepts=["price", "payment"], generate:
+  * "Glencore contract price terms"
+  * "payment conditions in Glencore agreement"
+  * "pricing mechanism Glencore"
+
+Return ONLY a JSON object with format: {{"targeted_queries": ["query1", "query2", "query3"]}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at creating targeted search queries using entity information."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.6,
+                max_tokens=250,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            parsed = json.loads(result_text)
+            targeted_queries = parsed.get("targeted_queries", [])
+            
+            logger.info(f"✅ Generated {len(targeted_queries)} targeted queries")
+            return targeted_queries[:max_queries]
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating targeted queries: {e}")
+            return [original_query]
+
+
+class DocumentQualityValidator:
+    """
+    Валидатор для проверки качества найденных документов.
+    Использует LLM для определения, содержат ли документы ответ на вопрос пользователя.
+    """
+    
+    def __init__(self, openai_client: AsyncOpenAI):
+        self.client = openai_client
+    
+    async def validate_documents_quality(
+        self,
+        query: str,
+        documents: List[RetrievedDocument],
+        max_llm_score: float
+    ) -> Dict[str, Any]:
+        """
+        Проверяет качество найденных документов.
+        
+        Returns:
+            dict with keys:
+            - has_answer: bool - содержат ли документы ответ
+            - confidence: float - уверенность 0-10
+            - missing_aspects: List[str] - что отсутствует в документах
+            - recommendation: str - рекомендация (continue/stop/broaden)
+        """
+        try:
+            logger.info(f"🔍 Validating document quality for query: {query[:100]}...")
+            
+            # Подготавливаем контент документов для анализа
+            docs_content = []
+            for i, doc in enumerate(documents[:5], 1):  # Берем топ-5 для валидации
+                metadata_str = ""
+                if doc.metadata:
+                    file_name = doc.metadata.get("file_name", "")
+                    page_label = doc.metadata.get("page_label", "")
+                    if file_name:
+                        metadata_str = f" (Source: {file_name}, Page: {page_label})"
+                
+                llm_score = doc.metadata.get("llm_rerank_score_raw", 0.0) if doc.metadata else 0.0
+                docs_content.append(f"Document {i}{metadata_str} [LLM Score: {llm_score:.1f}/10]:\n{doc.content[:400]}")
+            
+            docs_text = "\n\n".join(docs_content)
+            
+            system_prompt = """You are a document quality validator. Your task is to analyze whether the provided documents contain sufficient information to answer the user's question.
+
+Evaluate:
+1. Do the documents contain relevant information to answer the question?
+2. How confident are you that the answer can be found in these documents? (0-10)
+3. What aspects of the question are missing or unclear in the documents?
+4. What should we do next? (continue searching / stop and answer / broaden search)
+
+Be strict in your evaluation. If the documents don't clearly contain the answer, say so."""
+
+            user_prompt = f"""User's Question: {query}
+
+Top Retrieved Documents:
+{docs_text}
+
+Maximum LLM relevance score from all documents: {max_llm_score:.1f}/10
+
+Please evaluate:
+1. Do these documents contain the answer to the question?
+2. Your confidence level (0-10) that we can answer based on these documents
+3. What specific aspects are missing (if any)?
+4. Recommendation: "continue" (keep searching), "stop" (we have enough), "broaden" (try broader search)
+
+Return ONLY JSON: {{
+    "has_answer": true/false,
+    "confidence": 0-10,
+    "missing_aspects": ["aspect1", "aspect2"],
+    "recommendation": "continue/stop/broaden",
+    "reasoning": "brief explanation"
+}}"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            validation_result = json.loads(result_text)
+            
+            logger.info(f"✅ Validation result: has_answer={validation_result.get('has_answer')}, "
+                       f"confidence={validation_result.get('confidence')}/10, "
+                       f"recommendation={validation_result.get('recommendation')}")
+            
+            if validation_result.get('missing_aspects'):
+                logger.info(f"⚠️ Missing aspects: {validation_result.get('missing_aspects')}")
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating document quality: {e}")
+            # Fallback: используем LLM score как индикатор
+            return {
+                "has_answer": max_llm_score >= 7.0,
+                "confidence": max_llm_score,
+                "missing_aspects": [],
+                "recommendation": "stop" if max_llm_score >= 7.0 else "continue",
+                "reasoning": "Fallback validation based on LLM scores"
+            }
+
+
+class IterativeDocumentRetriever:
+    """
+    Слой для интеллектуального итеративного поиска документов с многоуровневой проверкой качества.
+    
+    Работает следующим образом:
+    1. Первая итерация: выполняет поиск с оригинальным запросом
+    2. Валидирует качество найденных документов с помощью LLM
+    3. Если качество низкое - анализирует недостающую информацию
+    4. Генерирует новые запросы для поиска пропущенных данных
+    5. Повторяет поиск с новыми запросами до достижения хорошего качества
+    6. Использует fallback стратегии (широкий поиск, разбиение на подвопросы)
+    7. Объединяет все результаты, удаляя дубликаты
+    
+    Критерии остановки:
+    - Validation показывает что ответ найден (confidence >= 7/10)
+    - Достигнут максимум итераций (5)
+    - Несколько итераций подряд не дают новых результатов (2 раза)
+    """
+    
+    def __init__(self, base_retriever, query_rephraser: QueryRephraser, validator: DocumentQualityValidator):
+        self.base_retriever = base_retriever
+        self.query_rephraser = query_rephraser
+        self.validator = validator
+        self.max_iterations = 5  # Увеличили с 3 до 5
+        self.min_new_docs_threshold = 1  # Минимум новых документов для продолжения поиска
+        self.low_relevance_threshold = 5.0  # Порог низкой релевантности LLM
+        self.high_confidence_threshold = 7.0  # Порог высокой уверенности для остановки
+        self.max_failed_iterations = 2  # Максимум неудачных итераций подряд
+    
+    async def retrieve_documents_iteratively(
+        self,
+        query: str,
+        top_k: int = 10,
+        score_threshold: float = 0.5,
+        document_ids: Optional[List[str]] = None
+    ) -> List[RetrievedDocument]:
+        """Итеративно ищет документы с многоуровневой проверкой качества"""
+        logger.info(f"🔄 Starting ENHANCED iterative document retrieval for: {query[:100]}...")
+        
+        all_documents = {}  # doc_id -> RetrievedDocument
+        iteration_stats = []
+        failed_iterations_count = 0  # Счетчик неудачных итераций подряд
+        used_search_strategies = set()  # Отслеживаем использованные стратегии
+        
+        # Итерация 1: Первый поиск с оригинальным запросом
+        logger.info(f"🔍 Iteration 1: Initial search with original query...")
+        docs = await self.base_retriever._retrieve_documents_base(
+            query=query,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            document_ids=document_ids
+        )
+        
+        # Добавляем найденные документы
+        for doc in docs:
+            if doc.doc_id not in all_documents:
+                all_documents[doc.doc_id] = doc
+        
+        # Получаем максимальный LLM score
+        max_llm_score = self._get_max_llm_score(all_documents)
+        
+        iteration_stats.append({
+            "iteration": 1,
+            "query": query,
+            "strategy": "original",
+            "found_docs": len(docs),
+            "new_docs": len(docs),
+            "total_unique": len(all_documents),
+            "max_llm_score": max_llm_score
+        })
+        logger.info(f"✅ Iteration 1: Found {len(docs)} docs | Max LLM: {max_llm_score:.1f}/10")
+        
+        # Валидация качества после первой итерации
+        validation = await self.validator.validate_documents_quality(
+            query=query,
+            documents=list(all_documents.values())[:10],
+            max_llm_score=max_llm_score
+        )
+        
+        logger.info(f"📊 Quality validation: confidence={validation.get('confidence', 0):.1f}/10, "
+                   f"recommendation={validation.get('recommendation')}")
+        
+        # Если уже есть хороший ответ - останавливаемся
+        if validation.get('confidence', 0) >= self.high_confidence_threshold:
+            logger.info(f"✅ High confidence achieved! Stopping search.")
+            final_docs = list(all_documents.values())
+            final_docs.sort(key=lambda x: x.score, reverse=True)
+            return final_docs[:top_k]
+        
+        used_search_strategies.add("original")
+        
+        # Дополнительные итерации с улучшенной логикой
+        for i in range(2, self.max_iterations + 1):
+            # Проверяем, не превысили ли мы лимит неудачных итераций
+            if failed_iterations_count >= self.max_failed_iterations:
+                logger.warning(f"🛑 Stopping: {failed_iterations_count} failed iterations in a row")
+                break
+            
+            # Определяем стратегию поиска на основе текущего состояния
+            current_max_llm = self._get_max_llm_score(all_documents)
+            recommendation = validation.get('recommendation', 'continue')
+            
+            # Выбираем стратегию поиска на основе текущего состояния
+            if recommendation == "broaden" or (current_max_llm < 3.0 and "broad" not in used_search_strategies):
+                # Стратегия 1: Широкий поиск
+                logger.info(f"🔍 Iteration {i}: Using BROAD search strategy...")
+                new_query = await self._generate_broad_query(query, all_documents)
+                strategy = "broad"
+                score_threshold = max(0.1, score_threshold * 0.5)  # Агрессивно снижаем порог
+            
+            elif current_max_llm < 4.0 and "targeted" not in used_search_strategies:
+                # Стратегия 2: Таргетированный поиск на основе сущностей (НОВАЯ СТРАТЕГИЯ)
+                logger.info(f"🔍 Iteration {i}: Using TARGETED search with entity extraction...")
+                entities = await self.query_rephraser.extract_key_entities(query)
+                targeted_queries = await self.query_rephraser.generate_targeted_queries(
+                    original_query=query,
+                    entities=entities,
+                    max_queries=3
+                )
+                # Берем первый таргетированный запрос
+                new_query = targeted_queries[0] if targeted_queries else query
+                strategy = "targeted"
+                score_threshold = max(0.2, score_threshold * 0.8)
+            
+            elif current_max_llm < 5.0 and "decomposed" not in used_search_strategies:
+                # Стратегия 3: Разбиение на подвопросы (НОВАЯ СТРАТЕГИЯ)
+                logger.info(f"🔍 Iteration {i}: Using DECOMPOSITION strategy...")
+                sub_queries = await self.query_rephraser.decompose_complex_query(query, max_subqueries=3)
+                # Берем первый подвопрос который еще не использовали
+                used_decomposed = len([s for s in iteration_stats if s.get('strategy') == 'decomposed'])
+                if used_decomposed < len(sub_queries):
+                    new_query = sub_queries[used_decomposed]
+                else:
+                    new_query = sub_queries[0] if sub_queries else query
+                strategy = "decomposed"
+            
+            elif current_max_llm < 6.0 and "missing_info" not in used_search_strategies:
+                # Стратегия 4: Поиск недостающей информации
+                logger.info(f"🔍 Iteration {i}: Analyzing missing information...")
+                missing_queries = await self.query_rephraser.analyze_and_find_missing_info(
+                    original_query=query,
+                    found_documents=list(all_documents.values())[:10],
+                    max_iterations=self.max_iterations
+                )
+                if len(missing_queries) > 1:
+                    query_idx = min(i - 2, len(missing_queries) - 2)
+                    new_query = missing_queries[query_idx + 1]
+                else:
+                    new_query = query
+                strategy = "missing_info"
+            
+            else:
+                # Стратегия 5: Простые вариации запроса (fallback)
+                logger.info(f"🔍 Iteration {i}: Generating query variations...")
+                variations = await self.query_rephraser._generate_simple_variations(query, max_iterations=5)
+                # Берем вариацию которую еще не использовали
+                used_count = len([s for s in iteration_stats if s.get('strategy') == 'variation'])
+                if used_count < len(variations):
+                    new_query = variations[min(used_count, len(variations)-1)]
+                else:
+                    logger.info(f"⚠️ All strategies exhausted, stopping...")
+                    break
+                strategy = "variation"
+            
+            used_search_strategies.add(strategy)
+            
+            logger.info(f"🔄 Strategy: {strategy} | Query: {new_query[:100]}...")
+            
+            # Выполняем поиск с новым запросом
+            new_docs = await self.base_retriever._retrieve_documents_base(
+                query=new_query,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                document_ids=document_ids
+            )
+            
+            # Подсчитываем новые документы
+            new_docs_count = 0
+            for doc in new_docs:
+                if doc.doc_id not in all_documents:
+                    all_documents[doc.doc_id] = doc
+                    new_docs_count += 1
+                else:
+                    # Обновляем score если новый документ имеет лучший score
+                    existing_doc = all_documents[doc.doc_id]
+                    if doc.score > existing_doc.score:
+                        all_documents[doc.doc_id] = doc
+            
+            # Обновляем максимальный LLM score
+            max_llm_score = self._get_max_llm_score(all_documents)
+            
+            iteration_stats.append({
+                "iteration": i,
+                "query": new_query,
+                "strategy": strategy,
+                "found_docs": len(new_docs),
+                "new_docs": new_docs_count,
+                "total_unique": len(all_documents),
+                "max_llm_score": max_llm_score
+            })
+            
+            logger.info(f"✅ Iteration {i}: Found {len(new_docs)} docs, {new_docs_count} new | "
+                       f"Total: {len(all_documents)} | Max LLM: {max_llm_score:.1f}/10")
+            
+            # Проверяем качество после каждой итерации
+            if new_docs_count > 0 or i == 2:  # Валидируем если есть новые документы или это вторая итерация
+                validation = await self.validator.validate_documents_quality(
+                    query=query,
+                    documents=list(all_documents.values())[:10],
+                    max_llm_score=max_llm_score
+                )
+                
+                confidence = validation.get('confidence', 0)
+                logger.info(f"📊 Validation after iteration {i}: confidence={confidence:.1f}/10")
+                
+                # Если достигнута высокая уверенность - останавливаемся
+                if confidence >= self.high_confidence_threshold:
+                    logger.info(f"✅ HIGH CONFIDENCE ACHIEVED ({confidence:.1f}/10)! Stopping search.")
+                    break
+            
+            # Обновляем счетчик неудачных итераций
+            if new_docs_count == 0:
+                failed_iterations_count += 1
+                logger.warning(f"⚠️ No new documents in iteration {i} (failed: {failed_iterations_count}/{self.max_failed_iterations})")
+            else:
+                failed_iterations_count = 0  # Сбрасываем если нашли новые документы
+        
+        # Конвертируем в список и сортируем по score
+        final_docs = list(all_documents.values())
+        final_docs.sort(key=lambda x: x.score, reverse=True)
+        
+        # Логируем детальную статистику
+        final_max_llm = self._get_max_llm_score(all_documents)
+        logger.info(f"📊 ENHANCED iterative search completed:")
+        for stat in iteration_stats:
+            logger.info(f"  Iter {stat['iteration']} ({stat['strategy']}): "
+                       f"{stat['found_docs']} docs ({stat['new_docs']} new) | "
+                       f"LLM: {stat['max_llm_score']:.1f}/10 | "
+                       f"Query: {stat['query'][:60]}...")
+        logger.info(f"  📈 Final: {len(final_docs)} unique docs | Best LLM score: {final_max_llm:.1f}/10")
+        
+        return final_docs[:top_k]
+    
+    def _get_max_llm_score(self, documents_dict: Dict[str, RetrievedDocument]) -> float:
+        """Получает максимальный LLM score из документов"""
+        max_score = 0.0
+        for doc in documents_dict.values():
+            if doc.metadata and "llm_rerank_score_raw" in doc.metadata:
+                max_score = max(max_score, doc.metadata["llm_rerank_score_raw"])
+        return max_score
+    
+    async def _generate_broad_query(
+        self,
+        original_query: str,
+        found_documents: Dict[str, RetrievedDocument]
+    ) -> str:
+        """Генерирует широкий запрос для более агрессивного поиска"""
+        # Используем метод из QueryRephraser
+        broad_queries = await self.query_rephraser._generate_broad_search_queries(
+            original_query=original_query,
+            max_iterations=2
+        )
+        return broad_queries[1] if len(broad_queries) > 1 else original_query
+
+
 class GenerateAnswerInteractor:
-    """Generate answers using RAG with Hybrid Search (Semantic + Keyword) + Reranking"""
+    """Generate answers using RAG with Hybrid Search (Semantic + Keyword) + Reranking + Enhanced Iterative Search"""
     def __init__(self):
         """Initialize the interactor with necessary components"""
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -344,12 +1065,15 @@ class GenerateAnswerInteractor:
         self.embedding = FastEmbedEmbeddings()
         self.reranker = SimpleReranker(self.openai_client)
         self.citation_pipeline = CitationPipeline(self.openai_client)
+        self.query_rephraser = QueryRephraser(self.openai_client)
+        self.quality_validator = DocumentQualityValidator(self.openai_client)  # NEW: Quality validator
         self.model = "gpt-4o-mini"
         self.max_tokens = 2000
         self.temperature = 0.3
         self.use_reranking = True
         self.use_keyword_search = True
         self.use_semantic_search = True  # Enable semantic search by default
+        self.use_iterative_search = True  # Enable iterative search by default
 
     async def keyword_search_lancedb(
         self,
@@ -379,19 +1103,59 @@ class GenerateAnswerInteractor:
     async def retrieve_documents(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int = 10,
         score_threshold: float = 0.5,
         semantic_weight: float = 0.7,
         keyword_weight: float = 0.3,
         document_ids: Optional[List[str]] = None,
     ) -> List[RetrievedDocument]:
-        """Retrieve relevant documents using Hybrid Search (Semantic + Keyword) + Reranking"""
+        """Retrieve relevant documents using Hybrid Search (Semantic + Keyword) + Reranking + Iterative Search"""
         try:
             if document_ids:
                 logger.info(f"🔍 Filtering search by document IDs: {document_ids}")
             else:
                 logger.info(f"🔍 Searching in all documents")
             
+            # Если включен итеративный поиск, используем его
+            if self.use_iterative_search:
+                logger.info("🔄 Using ENHANCED iterative search with quality validation...")
+                iterative_retriever = IterativeDocumentRetriever(
+                    base_retriever=self,
+                    query_rephraser=self.query_rephraser,
+                    validator=self.quality_validator
+                )
+                return await iterative_retriever.retrieve_documents_iteratively(
+                    query=query,
+                    top_k=top_k,
+                    score_threshold=score_threshold,
+                    document_ids=document_ids
+                )
+            
+            # Базовый поиск без итераций
+            return await self._retrieve_documents_base(
+                query=query,
+                top_k=top_k,
+                score_threshold=score_threshold,
+                semantic_weight=semantic_weight,
+                keyword_weight=keyword_weight,
+                document_ids=document_ids
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error in retrieve_documents: {e}", exc_info=True)
+            return []
+
+    async def _retrieve_documents_base(
+        self,
+        query: str,
+        top_k: int = 10,
+        score_threshold: float = 0.5,
+        semantic_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        document_ids: Optional[List[str]] = None,
+    ) -> List[RetrievedDocument]:
+        """Базовый метод поиска документов без итераций"""
+        try:
             # Initialize results
             semantic_docs = []
             keyword_docs = []
@@ -428,6 +1192,7 @@ class GenerateAnswerInteractor:
             if self.use_keyword_search:
                 try:
                     logger.info(f"🔤 Step 2: LanceDB Full-Text Search...")
+                    initial_k = top_k * 3 if self.use_semantic_search or self.use_reranking else top_k * 2
                     fts_results = await self.keyword_search_lancedb(query, top_k=initial_k, document_ids=document_ids)
                     if fts_results:
                         logger.info(f"✅ FTS found {len(fts_results)} documents")
@@ -575,7 +1340,7 @@ class GenerateAnswerInteractor:
         message: str,
         conv_id: str,
         history: Optional[List[Dict]] = None,
-        top_k: int = 5,
+        top_k: int = 10,
         document_ids: Optional[List[str]] = None,
         **kwargs
     ) -> AsyncGenerator[DocumentSchema, None]:
@@ -612,6 +1377,19 @@ class GenerateAnswerInteractor:
                     channel="chat"
                 )
                 return
+            
+            # Проверяем качество найденных документов
+            max_llm_score = 0.0
+            for doc in retrieved_docs:
+                if doc.metadata and "llm_rerank_score_raw" in doc.metadata:
+                    max_llm_score = max(max_llm_score, doc.metadata["llm_rerank_score_raw"])
+            
+            # Если все документы имеют низкую релевантность, предупреждаем пользователя
+            if max_llm_score < 3.0:
+                yield DocumentSchema(
+                    content=f"⚠️ **LOW RELEVANCE WARNING**\n\nThe retrieved documents have very low relevance scores (Max: {max_llm_score:.1f}/10). The information may not be accurate or complete. Please consider rephrasing your question or providing more specific details.",
+                    channel="info"
+                )
             avg_score = sum(d.score for d in retrieved_docs) / len(retrieved_docs)
             avg_semantic = sum(d.semantic_score for d in retrieved_docs) / len(retrieved_docs)
             avg_keyword = sum(d.keyword_score for d in retrieved_docs) / len(retrieved_docs)
@@ -662,12 +1440,15 @@ CRITICAL RULES:
 3. **If information is not in context** - Clearly state "I don't have this information in the available documents"
 4. **Use exact quotes when possible** - This ensures accuracy
 5. **Be concise but complete** - Provide all relevant information from the context
+6. **Handle low relevance gracefully** - If documents seem irrelevant, acknowledge this and suggest alternatives
 
 RESPONSE FORMAT:
 - Answer the question based ONLY on the retrieved documents
 - Use [1], [2], etc. to cite specific sources
 - If context doesn't contain the answer, say so clearly
-- Be helpful and conversational while staying accurate"""
+- If documents seem irrelevant to the question, acknowledge this limitation
+- Be helpful and conversational while staying accurate
+- Suggest how the user might rephrase their question for better results"""
             user_prompt = f"""Context documents:
 {context}
 
@@ -833,7 +1614,7 @@ Please answer the question using ONLY the information from the context above. Ci
         try:
             retrieved_docs = await self.retrieve_documents(
                 query=request.message,
-                top_k=5
+                top_k=10
             )
             if not retrieved_docs:
                 return GeneratedAnswerResponse(

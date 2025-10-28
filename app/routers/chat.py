@@ -37,7 +37,7 @@ async def stream_generator(interactor: GenerateAnswerInteractor, message: str, c
             message=message,
             conv_id=chat_id,
             history=history,
-            top_k=5,
+            top_k=10,  # Увеличили с 5 до 10 чтобы не терять документы из iterative search
             document_ids=document_ids
         ):
             # Format as Server-Sent Events
