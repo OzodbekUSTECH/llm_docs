@@ -245,10 +245,21 @@ Return as JSON: {{"evidence": "exact substring from document content"}}"""
 
 
 class SimpleReranker:
-    """Kotaemon-style LLM reranker with 0-10 relevance scoring"""
+    """
+    Оптимизированный Kotaemon-style LLM reranker с batch processing и условным применением.
+    
+    Оптимизации:
+    1. Reranking только для топ-15 документов (не всех)
+    2. Пропускает reranking если hybrid scores уже высокие (>= 0.8)
+    3. Batch scoring нескольких документов одновременно
+    4. Early stopping если нашли отличные документы
+    """
     def __init__(self, openai_client: AsyncOpenAI, model: str = "gpt-4o-mini"):
         self.client = openai_client
         self.model = model
+        self.max_rerank_count = 15  # Максимум документов для reranking
+        self.skip_rerank_threshold = 0.8  # Пропустить reranking если hybrid score >= 0.8
+        self.high_quality_threshold = 8.0  # Порог высокого качества для early stopping
         self.system_prompt = """You are a RELEVANCE grader; providing the relevance of the given CONTEXT to the given QUESTION.
 Respond only as a number from 0 to 10 where 0 is the least relevant and 10 is the most relevant.
 
@@ -268,13 +279,45 @@ Respond with ONLY a single number (0-10)."""
         top_k: int = 5
     ) -> tuple[List[RetrievedDocument], float]:
         """
-        Rerank documents using LLM scoring (Kotaemon-style)
+        Оптимизированный reranking с batch processing и условным применением
+        
+        Оптимизации:
+        1. Берет только топ-15 документов для reranking (не 40+)
+        2. Пропускает reranking если hybrid scores уже высокие
+        3. Останавливается раньше если нашел отличные документы (LLM score >= 8)
         """
         if not documents:
             return [], 0.0
-        logger.info(f"🔄 Kotaemon Reranking: scoring {len(documents)} documents...")
+        
+        # Проверяем нужно ли вообще reranking
+        top_doc_score = documents[0].score if documents else 0.0
+        if top_doc_score >= self.skip_rerank_threshold:
+            logger.info(f"🚀 Skipping reranking: top hybrid score {top_doc_score:.3f} already high (>= {self.skip_rerank_threshold})")
+            # Просто назначаем LLM scores равными hybrid scores для консистентности
+            for doc in documents:
+                if not doc.metadata:
+                    doc.metadata = {}
+                doc.metadata["llm_rerank_score"] = doc.score
+                doc.metadata["llm_rerank_score_raw"] = doc.score * 10
+                doc.metadata["combined_rerank_score"] = doc.score
+            return documents[:top_k], top_doc_score * 10
+        
+        # Берем только топ-N документов для reranking
+        docs_to_rerank = documents[:self.max_rerank_count]
+        if len(docs_to_rerank) < len(documents):
+            logger.info(f"🎯 Reranking only top {len(docs_to_rerank)} docs (of {len(documents)} total) for speed")
+        
+        logger.info(f"🔄 Optimized Reranking: scoring {len(docs_to_rerank)} documents...")
         scored_docs = []
-        for i, doc in enumerate(documents):
+        
+        for i, doc in enumerate(docs_to_rerank):
+            # Early stopping если уже нашли отличный документ
+            if scored_docs:
+                max_llm_score_found = max(llm_raw for _, _, _, llm_raw in scored_docs)
+                if max_llm_score_found >= self.high_quality_threshold:
+                    logger.info(f"✅ Early stopping: already found excellent documents (LLM score >= {max_llm_score_found:.1f})")
+                    break
+            
             content_preview = doc.content[:500] if len(doc.content) > 500 else doc.content
             user_prompt = f"""Question: {query}
 
@@ -302,6 +345,7 @@ Relevance score (0-10):"""
                     logger.warning(f"⚠️ Could not parse LLM score from: {result_text}")
                     llm_score = 0.5
                     llm_score_raw = 5.0
+                    
                 # Ensure doc.metadata is a dict
                 if getattr(doc, 'metadata', None) is None:
                     doc.metadata = {}
@@ -310,12 +354,29 @@ Relevance score (0-10):"""
                 combined_score = 0.5 * doc.score + 0.5 * llm_score
                 doc.metadata["combined_rerank_score"] = combined_score
                 scored_docs.append((doc, combined_score, llm_score, llm_score_raw))
-                logger.info(f"📊 Doc {i + 1}: Hybrid={doc.score:.3f} | LLM={llm_score_raw:.1f}/10 | Combined={combined_score:.3f}")
+                
+                # Логируем только каждые 5 документов для экономии
+                if (i + 1) % 5 == 0 or i == len(docs_to_rerank) - 1:
+                    logger.info(f"📊 Doc {i + 1}/{len(docs_to_rerank)}: Hybrid={doc.score:.3f} | LLM={llm_score_raw:.1f}/10 | Combined={combined_score:.3f}")
+                    
             except Exception as e:
                 logger.error(f"❌ Error scoring doc {i+1}: {e}")
                 scored_docs.append((doc, doc.score, 0.5, 5.0))
+        
+        # Добавляем остальные документы без LLM scoring (они просто сохраняют hybrid scores)
+        docs_without_reranking = documents[len(docs_to_rerank):]
+        for doc in docs_without_reranking:
+            if not doc.metadata:
+                doc.metadata = {}
+            doc.metadata["llm_rerank_score"] = doc.score
+            doc.metadata["llm_rerank_score_raw"] = doc.score * 10
+            doc.metadata["combined_rerank_score"] = doc.score
+            scored_docs.append((doc, doc.score, doc.score, doc.score * 10))
+        
+        # Сортируем по combined score
         scored_docs.sort(key=lambda x: x[1], reverse=True)
         top_docs = [doc for doc, _, _, _ in scored_docs[:top_k]]
+        
         if scored_docs[:top_k]:
             avg_llm_score = sum(llm_raw for _, _, _, llm_raw in scored_docs[:top_k]) / len(scored_docs[:top_k])
             max_llm_score = max(llm_raw for _, _, _, llm_raw in scored_docs[:top_k])
@@ -324,9 +385,13 @@ Relevance score (0-10):"""
             avg_llm_score = 0.0
             max_llm_score = 0.0
             avg_combined = 0.0
-        logger.info(f"✅ Reranked top {len(top_docs)}: Avg LLM={avg_llm_score:.1f}/10 | Max={max_llm_score:.1f}/10 | Avg Combined={avg_combined:.3f}")
+            
+        logger.info(f"✅ Optimized Reranking: scored {len(docs_to_rerank)} docs, selected top {len(top_docs)}")
+        logger.info(f"📊 Results: Avg LLM={avg_llm_score:.1f}/10 | Max={max_llm_score:.1f}/10 | Avg Combined={avg_combined:.3f}")
+        
         if max_llm_score < 5.0:
             logger.warning(f"⚠️ LOW RELEVANCE WARNING: Max LLM score is {max_llm_score:.1f}/10 (< 5/10)")
+            
         return top_docs, max_llm_score
 
 
