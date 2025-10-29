@@ -826,8 +826,12 @@ class DocumentQualityValidator:
             logger.info(f"🔍 Validating document quality for query: {query[:100]}...")
             
             # Подготавливаем контент документов для анализа
+            # ВАЖНО: Берем больше документов (15 вместо 5), так как новые документы могут быть дальше в списке
             docs_content = []
-            for i, doc in enumerate(documents[:5], 1):  # Берем топ-5 для валидации
+            docs_to_check = documents[:15]  # Увеличили с 5 до 15 для лучшей проверки
+            logger.info(f"🔍 Validating {len(docs_to_check)} documents (out of {len(documents)} total) for completeness")
+            
+            for i, doc in enumerate(docs_to_check, 1):
                 metadata_str = ""
                 if doc.metadata:
                     file_name = doc.metadata.get("file_name", "")
@@ -836,20 +840,25 @@ class DocumentQualityValidator:
                         metadata_str = f" (Source: {file_name}, Page: {page_label})"
                 
                 llm_score = doc.metadata.get("llm_rerank_score_raw", 0.0) if doc.metadata else 0.0
-                docs_content.append(f"Document {i}{metadata_str} [LLM Score: {llm_score:.1f}/10]:\n{doc.content[:400]}")
+                # Увеличиваем preview до 600 символов для более полной проверки
+                docs_content.append(f"Document {i}{metadata_str} [Score: {doc.score:.3f}, LLM: {llm_score:.1f}/10]:\n{doc.content[:600]}")
             
             docs_text = "\n\n".join(docs_content)
             
-            system_prompt = """You are a STRICT document quality validator. Your task is to analyze whether the provided documents contain ALL aspects requested in the user's question.
+            system_prompt = """You are a STRICT but INTELLIGENT document quality validator. Your task is to analyze whether the provided documents contain ALL aspects requested in the user's question.
 
 IMPORTANT RULES:
 1. Extract ALL specific aspects/fields requested in the question (e.g., buyer, seller, price, quality, delivery terms, payment terms)
 2. Check if EACH aspect is present in the documents
-3. If ANY aspect is missing - list it in missing_aspects
-4. Recommendation should be "continue" if ANY aspect is missing, even if confidence is high
-5. Only recommend "stop" if ALL aspects are clearly present in the documents
+3. Understand that:
+   - "buyer" means: buyer company name, buyer organization, purchaser, or any entity acting as buyer
+   - "seller" means: seller company name, seller organization, vendor, or any entity acting as seller
+   - These don't need to have the exact words "buyer" or "seller" - company names ARE buyer/seller information
+4. If ANY aspect is missing - list it in missing_aspects
+5. Recommendation should be "continue" if ANY aspect is missing, even if confidence is high
+6. Only recommend "stop" if ALL aspects are clearly present in the documents
 
-Be VERY STRICT. Missing even one requested aspect means we should continue searching."""
+Be STRICT but SMART: Missing even one requested aspect means we should continue searching, BUT if you see company names/entities clearly identified, count that as buyer/seller found."""
 
             user_prompt = f"""User's Question: {query}
 
@@ -865,7 +874,19 @@ CRITICAL TASK:
 4. Confidence should reflect completeness (lower if aspects missing)
 5. Recommendation MUST be "continue" if ANY aspect is missing, even if confidence is 8-10
 
-Example: If question asks for "buyer, seller, price, quality" and documents only have buyer, seller, quality → missing_aspects=["price"], recommendation="continue"
+IMPORTANT EXAMPLES:
+- If documents contain "Jiangsu Provincial Foreign Trade Corporation" or "Xiamen Xiangyu Logistics Group" → BUYER IS FOUND (these are buyer companies)
+- If documents contain "Fujax UK Limited" → SELLER IS FOUND (this is seller company)
+- If documents have company names but don't explicitly say "buyer" or "seller" → STILL COUNT as buyer/seller found if context is clear
+- If documents mention "for SC-240-FJK" or "for SC-294-FJK" with company names → These are buyer/seller for those contracts
+
+Example 1: Question asks for "buyer, seller, price, quality" and documents have:
+  - "Jiangsu Provincial Foreign Trade Corporation (for SC-240-FJK)" 
+  - "Fujax UK Limited"
+  - Quality specs: "Cr2O3: 42%"
+  → Found: buyer, seller, quality | Missing: price | Recommendation: continue
+
+Example 2: Question asks for "buyer, seller, price, quality" and documents have buyer, seller, quality, price → ALL FOUND | Recommendation: stop
 
 Return ONLY JSON: {{
     "has_answer": true/false,
@@ -985,9 +1006,12 @@ class IterativeDocumentRetriever:
         logger.info(f"✅ Iteration 1: Found {len(docs)} docs | Max LLM: {max_llm_score:.1f}/10")
         
         # Валидация качества после первой итерации
+        # Берем топ-20 документов для более полной проверки (новые документы могут быть дальше)
+        all_docs_list = list(all_documents.values())
+        all_docs_list.sort(key=lambda x: x.score, reverse=True)
         validation = await self.validator.validate_documents_quality(
             query=query,
-            documents=list(all_documents.values())[:10],
+            documents=all_docs_list[:20],  # Увеличили с 10 до 20
             max_llm_score=max_llm_score
         )
         
@@ -1024,21 +1048,25 @@ class IterativeDocumentRetriever:
             
             # Определяем стратегию поиска на основе текущего состояния
             current_max_llm = self._get_max_llm_score(all_documents)
+            # Используем последнюю validation (она обновляется внутри цикла после итерации)
             recommendation = validation.get('recommendation', 'continue')
             missing_aspects = validation.get('missing_aspects', [])
+            current_missing = None  # Для отслеживания какого аспекта ищем
             
             # ПРИОРИТЕТ 1: Поиск недостающих аспектов (САМАЯ ВАЖНАЯ СТРАТЕГИЯ!)
             if missing_aspects:
-                # Считаем сколько раз уже использовали эту стратегию
-                missing_aspects_used = len([s for s in iteration_stats if s.get('strategy') == 'missing_aspects'])
+                # Считаем какие аспекты мы уже искали в предыдущих итерациях
+                previous_searches = [s.get('aspect_searched', '') for s in iteration_stats if s.get('strategy') == 'missing_aspects' and s.get('aspect_searched')]
                 
-                # Используем эту стратегию для каждого недостающего аспекта
-                if missing_aspects_used < len(missing_aspects):
+                # Находим аспекты которые еще НЕ искали (или которые все еще missing)
+                aspects_to_search = [asp for asp in missing_aspects if asp not in previous_searches]
+                
+                if aspects_to_search:
+                    # Берем первый еще не искавшийся аспект
+                    current_missing = aspects_to_search[0]
                     logger.info(f"🔍 Iteration {i}: Using MISSING ASPECTS search strategy...")
-                    logger.info(f"🎯 Searching for missing aspect #{missing_aspects_used + 1}: {missing_aspects[missing_aspects_used]}")
-                    
-                    # Берем следующий недостающий аспект
-                    current_missing = missing_aspects[missing_aspects_used]
+                    logger.info(f"🎯 Searching for missing aspect: {current_missing}")
+                    logger.info(f"📋 Previously searched: {previous_searches}, Still missing: {aspects_to_search}")
                     
                     # Генерируем точный запрос для этого аспекта через LLM
                     try:
@@ -1059,9 +1087,36 @@ class IterativeDocumentRetriever:
                     score_threshold = max(0.1, score_threshold * 0.5)  # Очень агрессивно снижаем порог
                     logger.info(f"🔄 Generated targeted query for '{current_missing}': {new_query[:100]}...")
                 else:
-                    # Все аспекты уже проверены, пропускаем эту стратегию и идем дальше
-                    missing_aspects = []  # Сбрасываем флаг
-                    strategy = None  # Будет установлен в следующем условии
+                    # Все аспекты из текущего списка уже проверены, но они все еще missing
+                    # Попробуем использовать более широкие термины или альтернативные формулировки
+                    if len(previous_searches) < len(missing_aspects) * 2:  # Пробуем максимум 2 раза для каждого
+                        # Используем альтернативные термины
+                        aspect_alternatives = {
+                            "buyer": ["buyer", "purchaser", "buyer company", "buyer name"],
+                            "seller": ["seller", "vendor", "seller company", "seller name"]
+                        }
+                        # Берем первый все еще missing аспект и пробуем альтернативный термин
+                        still_missing = missing_aspects[0] if missing_aspects else None
+                        if still_missing and still_missing in aspect_alternatives:
+                            alternatives = aspect_alternatives[still_missing]
+                            # Пробуем следующий альтернативный термин
+                            alt_index = len([s for s in iteration_stats if s.get('aspect_searched') == still_missing])
+                            if alt_index < len(alternatives):
+                                current_missing = f"{still_missing} (alt: {alternatives[alt_index]})"
+                                new_query = f"chrome deal {alternatives[alt_index]}"
+                                strategy = "missing_aspects"
+                                logger.info(f"🔄 Trying alternative term for '{still_missing}': {alternatives[alt_index]}")
+                            else:
+                                missing_aspects = []
+                                strategy = None
+                        else:
+                            missing_aspects = []
+                            strategy = None
+                    else:
+                        # Превысили лимит попыток, используем другую стратегию
+                        logger.warning(f"⚠️ Exceeded retry limit for missing aspects. Trying other strategies...")
+                        missing_aspects = []
+                        strategy = None
             
             # Продолжаем выбор стратегии только если не выбрали missing_aspects
             if not strategy:
@@ -1153,7 +1208,8 @@ class IterativeDocumentRetriever:
             # Обновляем максимальный LLM score
             max_llm_score = self._get_max_llm_score(all_documents)
             
-            iteration_stats.append({
+            # Сохраняем статистику итерации
+            stat_entry = {
                 "iteration": i,
                 "query": new_query,
                 "strategy": strategy,
@@ -1161,16 +1217,23 @@ class IterativeDocumentRetriever:
                 "new_docs": new_docs_count,
                 "total_unique": len(all_documents),
                 "max_llm_score": max_llm_score
-            })
+            }
+            # Сохраняем какой аспект искали для missing_aspects стратегии
+            if strategy == "missing_aspects" and current_missing is not None:
+                stat_entry["aspect_searched"] = current_missing
+            iteration_stats.append(stat_entry)
             
             logger.info(f"✅ Iteration {i}: Found {len(new_docs)} docs, {new_docs_count} new | "
                        f"Total: {len(all_documents)} | Max LLM: {max_llm_score:.1f}/10")
             
             # Проверяем качество после каждой итерации
             if new_docs_count > 0 or i == 2:  # Валидируем если есть новые документы или это вторая итерация
+                # Берем топ-20 документов отсортированных по score
+                all_docs_list = list(all_documents.values())
+                all_docs_list.sort(key=lambda x: x.score, reverse=True)
                 validation = await self.validator.validate_documents_quality(
                     query=query,
-                    documents=list(all_documents.values())[:10],
+                    documents=all_docs_list[:20],  # Увеличили с 10 до 20
                     max_llm_score=max_llm_score
                 )
                 
