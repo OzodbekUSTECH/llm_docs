@@ -11,7 +11,9 @@ from app.entities.sources import Source
 from app.entities.indexes import Index
 from app.utils.docs_store import LanceDBDocumentStore
 from app.utils.vectors_store import QdrantVectorStore
-from app.utils.embeddings import FastEmbedEmbeddings
+from app.utils.embeddings import OpenAIEmbeddings
+from app.utils.collections import Collections
+from app.core.config import settings
 from app.utils.enums import IndexType
 from app.exceptions.app_error import AppError
 
@@ -50,8 +52,11 @@ class SearchDocumentsInteractor:
         self.sources_repository = sources_repository
         self.indexes_repository = indexes_repository
         self.docs_store = LanceDBDocumentStore()
-        self.vector_store = QdrantVectorStore()
-        self.embedding = FastEmbedEmbeddings()
+        self.vector_store = QdrantVectorStore(
+            collection_name=Collections.DOCUMENT_EMBEDDINGS,
+            vector_size=3072
+        )
+        self.embedding = OpenAIEmbeddings(model_name="text-embedding-3-large", api_key=settings.OPENAI_API_KEY)
 
     async def execute(
         self, 
@@ -75,7 +80,7 @@ class SearchDocumentsInteractor:
             logger.info(f"🔍 Searching: '{query}' (limit: {limit}, threshold: {similarity_threshold})")
             
             # 1. Semantic Search (Qdrant)
-            query_embedding_docs = self.embedding.invoke(query)
+            query_embedding_docs = await self.embedding.ainvoke(query)
             if not query_embedding_docs or not getattr(query_embedding_docs[0], "embedding", None):
                 logger.error("Failed to create query embedding")
                 return []

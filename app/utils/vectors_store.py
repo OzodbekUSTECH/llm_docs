@@ -18,7 +18,7 @@ class QdrantVectorStore:
         self,
         collection_name: str = "documents",
         url: str = "http://localhost:6333",
-        vector_size: int = 768,
+        vector_size: int = 3072,
         distance: Distance = Distance.COSINE,
         batch_size: int = 100,
         **kwargs: Any,

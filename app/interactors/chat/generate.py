@@ -14,8 +14,9 @@ from app.dto.schemas import DocumentSchema, RetrievedDocument
 from app.services.chat_storage import chat_storage
 from app.interactors.chat.system_prompts import STRICT_RAG_PROMPT
 from app.utils.vectors_store import QdrantVectorStore
-from app.utils.embeddings import FastEmbedEmbeddings
+from app.utils.embeddings import OpenAIEmbeddings
 from app.utils.docs_store import LanceDBDocumentStore
+from app.utils.collections import Collections
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -257,7 +258,7 @@ class SimpleReranker:
     def __init__(self, openai_client: AsyncOpenAI, model: str = "gpt-4o-mini"):
         self.client = openai_client
         self.model = model
-        self.max_rerank_count = 15  # Максимум документов для reranking
+        self.max_rerank_count = 30  # Увеличили для лучшего покрытия (было 15)
         self.skip_rerank_threshold = 0.8  # Пропустить reranking если hybrid score >= 0.8
         self.high_quality_threshold = 8.0  # Порог высокого качества для early stopping
         self.system_prompt = """You are a RELEVANCE grader; providing the relevance of the given CONTEXT to the given QUESTION.
@@ -748,8 +749,6 @@ Return ONLY a JSON object with format: {{"targeted_queries": ["query1", "query2"
     ) -> str:
         """
         Генерирует точный поисковый запрос для конкретного недостающего аспекта.
-        Например, если missing_aspect="price", а original_query="chrome deal buyer seller",
-        генерирует "chrome deal price" или "chrome price terms"
         """
         try:
             prompt = f"""Given the original user question and a missing aspect, generate a precise search query to find information about that specific aspect.
@@ -758,43 +757,100 @@ Original Question: {original_query}
 Missing Aspect: {missing_aspect}
 
 Generate a search query that:
-1. Includes the main context from the original question (e.g., "chrome deal", "contract")
-2. Focuses specifically on finding the missing aspect (e.g., "price")
+1. Includes the main context from the original question
+2. Focuses specifically on finding the missing aspect
 3. Uses natural language that would match document content
 4. Keeps it concise (5-10 words max)
 
-Examples:
-- Original: "chrome deal buyer seller quality" + Missing: "price" → "chrome deal price"
-- Original: "information on contract" + Missing: "payment terms" → "contract payment terms"
-- Original: "Glencore agreement" + Missing: "delivery" → "Glencore delivery terms"
+Think about:
+- What synonyms or related terms might be used in documents?
+- What specific information would answer this aspect?
+- How might this information be expressed differently?
 
 Return ONLY the search query, nothing else:"""
 
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are an expert at generating precise search queries for finding specific information in documents."},
+                    {"role": "system", "content": "You are an expert at generating precise search queries for finding specific information in documents. You understand semantic relationships and can create effective search queries."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
-                max_tokens=50
+                temperature=0.4,
+                max_tokens=60
             )
             
             result = response.choices[0].message.content.strip()
-            # Убираем кавычки если есть
             result = result.strip('"\'')
             logger.info(f"✅ Generated aspect query: {result}")
             return result
                 
         except Exception as e:
             logger.error(f"❌ Error generating query for aspect '{missing_aspect}': {e}")
-            # Fallback
-            if "deal" in original_query.lower():
-                return f"{missing_aspect} chrome deal"
-            elif "contract" in original_query.lower():
-                return f"{missing_aspect} contract"
-            else:
-                return f"{original_query[:50]} {missing_aspect}"
+            # Simple fallback без хардкода
+            words = original_query.split()[:5]
+            return " ".join(words) + " " + missing_aspect
+    
+    async def _generate_alternative_query_for_aspect(
+        self,
+        original_query: str,
+        missing_aspect: str,
+        attempt_number: int,
+        previous_queries: List[str] = None
+    ) -> str:
+        """
+        Генерирует альтернативный поисковый запрос для недостающего аспекта.
+        Использует LLM для создания разнообразных запросов без хардкода.
+        """
+        try:
+            previous_str = ""
+            if previous_queries:
+                previous_str = f"\nPrevious search queries tried:\n" + "\n".join(f"- {q}" for q in previous_queries[:3])
+            
+            prompt = f"""The user asked: "{original_query}"
+
+We are searching for information about: "{missing_aspect}"
+
+This is attempt #{attempt_number} to find this information.{previous_str}
+
+Your task: Generate a DIFFERENT search query that might find this missing information.
+
+Guidelines:
+1. Use different keywords, synonyms, and expressions from previous attempts
+2. Think about how this information might be expressed in documents (technical terms, alternative phrasing, context-specific language)
+3. Consider related concepts that might lead to the same information
+4. Keep it concise (5-10 words)
+5. Include relevant context from the original question
+
+Examples of different approaches:
+- Use synonyms of key terms
+- Include technical or domain-specific language
+- Use broader or more specific terms
+- Include related concepts that might appear near the information
+- Try different grammatical structures
+
+Return ONLY the search query, nothing else:"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at generating diverse, creative search queries. You understand how to vary terminology and phrasing to find the same information through different paths. You avoid repeating previous queries."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,  # Higher temperature for more diversity
+                max_tokens=60
+            )
+            
+            result = response.choices[0].message.content.strip()
+            result = result.strip('"\'')
+            logger.info(f"✅ Generated alternative query (attempt {attempt_number}): {result}")
+            return result
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating alternative query for '{missing_aspect}': {e}")
+            # Простой fallback - комбинируем ключевые слова из запроса без хардкода
+            words = [w for w in original_query.split() if len(w) > 3][:max(3, 5 - attempt_number)]
+            context = " ".join(words) if words else original_query[:40]
+            return f"{missing_aspect} {context}".strip()
 
 
 class DocumentQualityValidator:
@@ -840,31 +896,35 @@ class DocumentQualityValidator:
                         metadata_str = f" (Source: {file_name}, Page: {page_label})"
                 
                 llm_score = doc.metadata.get("llm_rerank_score_raw", 0.0) if doc.metadata else 0.0
-                # Увеличиваем preview до 800 символов для более полной проверки (особенно для quality specs)
-                docs_content.append(f"Document {i}{metadata_str} [Score: {doc.score:.3f}, LLM: {llm_score:.1f}/10]:\n{doc.content[:800]}")
+                # Увеличиваем preview для более полной проверки - берем больше контента или весь если короткий
+                content_preview = doc.content[:1200] if len(doc.content) > 1200 else doc.content
+                # Если документ очень длинный и мы не нашли нужной информации, пробуем искать в конце
+                if len(doc.content) > 1200:
+                    content_preview += "\n\n[...document continues, checking key sections...]"
+                    # Берем также последние 300 символов на случай если важная информация в конце
+                    if len(doc.content) > 1500:
+                        content_preview += "\n" + doc.content[-300:]
+                docs_content.append(f"Document {i}{metadata_str} [Score: {doc.score:.3f}, LLM: {llm_score:.1f}/10]:\n{content_preview}")
             
             docs_text = "\n\n".join(docs_content)
             
             system_prompt = """You are a STRICT but INTELLIGENT document quality validator. Your task is to analyze whether the provided documents contain ALL aspects requested in the user's question.
 
-IMPORTANT RULES:
-1. Extract ALL specific aspects/fields requested in the question (e.g., buyer, seller, price, quality, delivery terms, payment terms)
-2. Check if EACH aspect is present in the documents
-3. Understand that:
-   - "buyer" means: buyer company name, buyer organization, purchaser, or any entity acting as buyer
-   - "seller" means: seller company name, seller organization, vendor, or any entity acting as seller
-   - "quality" means: quality specifications, chemical composition, technical specs, percentages, ratios, standards
-     * Examples: "Cr2O3: 40%", "Fe ratio: 1.40:1", "SiO2: 12% Max", "Cr/Fe ratio", "Moisture: 5%", "Sizing: 10mm-35mm"
-     * Quality specs DON'T need the word "quality" - chemical percentages, ratios, specifications ARE quality
-   - "price" means: pricing information, cost, price per unit, payment amount, financial terms
-   - "delivery terms" means: shipping terms, delivery location, port, destination, shipment dates
-   - "payment terms" means: payment conditions, letter of credit, payment method, payment schedule
-   - These don't need to have the exact words - specific information counts!
-4. If ANY aspect is missing - list it in missing_aspects
-5. Recommendation should be "continue" if ANY aspect is missing, even if confidence is high
-6. Only recommend "stop" if ALL aspects are clearly present in the documents
+CRITICAL RULES:
+1. **Extract ALL specific aspects** - Identify every distinct piece of information the user is asking for (not just the explicit words, but the concepts behind them)
+2. **Check completeness** - Verify if EACH aspect is present in the documents
+3. **Understand semantic equivalence** - Information doesn't need to use exact words:
+   - Company names, organization names, entity names = specific entities requested
+   - Specifications, percentages, ratios, measurements, technical details = technical specifications requested
+   - Prices, costs, amounts, financial terms = pricing information requested
+   - Locations, ports, dates, shipping details = delivery/shipping information requested
+   - Payment methods, conditions, schedules = payment information requested
+   - Any concrete data that answers the question = relevant information
+4. **Be intelligent, not literal** - If documents contain the INFORMATION that answers the question (even if worded differently), it counts as found
+5. **Missing aspects** - Only list aspects where NO relevant information exists in the documents
+6. **Recommendation** - "continue" if ANY aspect is missing, "stop" only when ALL aspects are present
 
-Be STRICT but SMART: Missing even one requested aspect means we should continue searching, BUT if you see specific information (company names, quality specs, etc.), count that as found."""
+Be STRICT about completeness but SMART about recognizing information in different forms."""
 
             user_prompt = f"""User's Question: {query}
 
@@ -874,38 +934,14 @@ Top Retrieved Documents:
 Maximum LLM relevance score from all documents: {max_llm_score:.1f}/10
 
 CRITICAL TASK:
-1. First, extract ALL specific aspects/fields requested in the question (e.g., if question asks for "buyer, seller, price, quality, delivery terms, payment terms" - extract all 6)
-2. Check if EACH aspect is present in the documents above
-3. List ALL missing aspects in missing_aspects array
-4. Confidence should reflect completeness (lower if aspects missing)
-5. Recommendation MUST be "continue" if ANY aspect is missing, even if confidence is 8-10
+1. **Extract all aspects** - Identify EVERY distinct piece of information the user is requesting (not just keywords, but what information they need)
+2. **Check each aspect** - For each aspect, check if the documents contain relevant information (even if worded differently)
+3. **Semantic understanding** - If documents contain information that answers the aspect (even with different terminology), it counts as found
+4. **List missing aspects** - Only list aspects where NO relevant information exists in ANY of the documents
+5. **Confidence** - Should reflect how complete the answer is (lower if many aspects missing)
+6. **Recommendation** - "continue" if ANY aspect is missing, even if confidence seems high
 
-IMPORTANT EXAMPLES:
-- If documents contain "Jiangsu Provincial Foreign Trade Corporation" or "Xiamen Xiangyu Logistics Group" → BUYER IS FOUND (these are buyer companies)
-- If documents contain "Fujax UK Limited" → SELLER IS FOUND (this is seller company)
-- If documents have company names but don't explicitly say "buyer" or "seller" → STILL COUNT as buyer/seller found if context is clear
-- If documents mention "for SC-240-FJK" or "for SC-294-FJK" with company names → These are buyer/seller for those contracts
-- QUALITY SPECS examples (these COUNT as quality found):
-  * "Cr2O3: 40% basis, 36% Min" → QUALITY FOUND ✅
-  * "Cr/Fe ratio: 1.40:1 Typical, 1.35:1 Min" → QUALITY FOUND ✅
-  * "SiO2: 12% Max, Al2O3: 16% Max" → QUALITY FOUND ✅
-  * "Cr203: 40% basis" (note: Cr203 = Cr2O3, same thing) → QUALITY FOUND ✅
-  * Any chemical composition, percentages, ratios, technical specifications → QUALITY FOUND ✅
-  * DON'T require the word "quality" - chemical specs ARE quality information!
-
-Example 1: Question asks for "buyer, seller, price, quality" and documents have:
-  - "Jiangsu Provincial Foreign Trade Corporation (for SC-240-FJK)" 
-  - "Fujax UK Limited"
-  - "Cr2O3: 42% basis, 38% Min; Cr/Fe ratio: 1.65:1"
-  → Found: buyer, seller, quality | Missing: price | Recommendation: continue
-
-Example 2: Question asks for "buyer, seller, price, quality" and documents have:
-  - Company names (buyer/seller)
-  - "Cr203: 40% basis, 36% Min; Fe ratio: 1.40:1"
-  - Price information
-  → ALL FOUND | Recommendation: stop
-
-Example 3: Question asks for "quality" and document has "Cr2O3: 40%, Fe: 1.40:1, SiO2: 12%" → QUALITY FOUND (even without word "quality")
+GENERAL PRINCIPLE: If the documents contain information that answers what the user is asking for (even if expressed differently), count it as found. Only list aspects as missing if there is genuinely no relevant information in the documents.
 
 Return ONLY JSON: {{
     "has_answer": true/false,
@@ -1102,84 +1138,48 @@ class IterativeDocumentRetriever:
                     try:
                         new_query = await self.query_rephraser._generate_query_for_aspect(query, current_missing)
                     except Exception as e:
-                        logger.warning(f"⚠️ Error generating query for aspect: {e}, using fallback")
-                        # Fallback: простая комбинация
-                        if "deal" in query.lower():
-                            new_query = f"{current_missing} chrome deal"
-                        elif "contract" in query.lower():
-                            new_query = f"{current_missing} contract"
-                        else:
-                            context_words = [w for w in query.lower().split() if len(w) > 4][:3]
-                            context = " ".join(context_words) if context_words else query[:50]
-                            new_query = f"{context} {current_missing}"
+                        logger.warning(f"⚠️ Error generating query for aspect: {e}, using simple fallback")
+                        # Простой fallback без хардкода - берем ключевые слова из запроса
+                        context_words = [w for w in query.split() if len(w) > 3][:4]
+                        context = " ".join(context_words) if context_words else query[:50]
+                        new_query = f"{context} {current_missing}"
                     
                     strategy = "missing_aspects"
                     score_threshold = max(0.1, score_threshold * 0.5)  # Очень агрессивно снижаем порог
                     logger.info(f"🔄 Generated targeted query for '{current_missing}': {new_query[:100]}...")
                 else:
                     # Все аспекты уже искали минимум один раз, но они все еще missing
-                    # Попробуем использовать альтернативные термины
+                    # Генерируем альтернативные термины и поисковые запросы через LLM
                     total_attempts = len(previous_searches_raw)
-                    max_attempts_per_aspect = 5  # Пробуем до 5 альтернатив для каждого аспекта
+                    max_attempts_per_aspect = 3  # Максимум 3 попытки с альтернативными терминами
                     
                     if total_attempts < len(missing_aspects) * max_attempts_per_aspect:
-                        # Используем альтернативные термины
-                        aspect_alternatives = {
-                            "buyer": ["buyer", "purchaser", "buyer company", "buyer name", "buyer organization"],
-                            "seller": ["seller", "vendor", "seller company", "seller name", "seller organization"],
-                            "quality": [
-                                "quality", 
-                                "quality specifications", 
-                                "chemical composition", 
-                                "specifications",
-                                "Cr2O3", 
-                                "Cr/Fe ratio",
-                                "technical specifications",
-                                "quality specs",
-                                "Cr203",
-                                "chrome quality specs"
-                            ],
-                            "price": [
-                                "price",
-                                "pricing",
-                                "cost",
-                                "price per unit",
-                                "USD per MT",
-                                "pricing terms",
-                                "price clause",
-                                "price terms"
-                            ]
-                        }
-                        # Берем первый все еще missing аспект и пробуем альтернативный термин
                         still_missing = missing_aspects[0] if missing_aspects else None
-                        if still_missing and still_missing in aspect_alternatives:
-                            alternatives = aspect_alternatives[still_missing]
-                            
-                            # Считаем сколько раз уже искали этот конкретный аспект (включая альтернативы)
+                        if still_missing:
+                            # Считаем сколько раз уже искали этот аспект
                             searched_for_this = len([s for s in previous_searches_raw 
                                                     if s and (s == still_missing or s.startswith(f"{still_missing} (alt:"))])
                             
-                            if searched_for_this < len(alternatives):
-                                current_alt = alternatives[searched_for_this]
-                                current_missing = f"{still_missing} (alt: {current_alt})"
-                                
-                                # Генерируем запрос с альтернативным термином
-                                if "deal" in query.lower():
-                                    new_query = f"chrome deal {current_alt}"
-                                elif "contract" in query.lower():
-                                    new_query = f"{current_alt} contract"
-                                else:
-                                    context_words = [w for w in query.lower().split() if len(w) > 4][:2]
-                                    context = " ".join(context_words) if context_words else "chrome"
-                                    new_query = f"{context} {current_alt}"
-                                
-                                strategy = "missing_aspects"
-                                logger.info(f"🔄 Trying alternative term #{searched_for_this + 1}/{len(alternatives)} for '{still_missing}': '{current_alt}'")
-                                logger.info(f"🔄 Generated query: {new_query}")
-                                score_threshold = max(0.05, score_threshold * 0.4)  # Еще более агрессивно снижаем порог
+                            if searched_for_this < max_attempts_per_aspect:
+                                try:
+                                    # Генерируем альтернативные поисковые запросы через LLM
+                                    new_query = await self.query_rephraser._generate_alternative_query_for_aspect(
+                original_query=query,
+                                        missing_aspect=still_missing,
+                                        attempt_number=searched_for_this + 1,
+                                        previous_queries=[s for s in previous_searches_raw if still_missing in s]
+                                    )
+                                    current_missing = f"{still_missing} (alt: attempt {searched_for_this + 1})"
+                                    strategy = "missing_aspects"
+                                    logger.info(f"🔄 Trying alternative search #{searched_for_this + 1}/{max_attempts_per_aspect} for '{still_missing}'")
+                                    logger.info(f"🔄 LLM-generated alternative query: {new_query}")
+                                    score_threshold = max(0.05, score_threshold * 0.4)  # Агрессивно снижаем порог
+                                except Exception as e:
+                                    logger.warning(f"⚠️ Error generating alternative query: {e}")
+                                    missing_aspects = []
+                                    strategy = None
                             else:
-                                # Все альтернативы испробованы для этого аспекта
-                                logger.warning(f"⚠️ All {len(alternatives)} alternatives tried for '{still_missing}'. Moving to other strategies...")
+                                logger.warning(f"⚠️ Max attempts ({max_attempts_per_aspect}) reached for '{still_missing}'. Moving to other strategies...")
                                 missing_aspects = []
                                 strategy = None
                         else:
@@ -1277,17 +1277,17 @@ class IterativeDocumentRetriever:
                     existing_doc = all_documents[doc.doc_id]
                     if doc.score > existing_doc.score:
                         all_documents[doc.doc_id] = doc
-            
+                
             # Обновляем максимальный LLM score
             max_llm_score = self._get_max_llm_score(all_documents)
             
             # Сохраняем статистику итерации
             stat_entry = {
-                "iteration": i,
+                    "iteration": i,
                 "query": new_query,
                 "strategy": strategy,
-                "found_docs": len(new_docs),
-                "new_docs": new_docs_count,
+                    "found_docs": len(new_docs),
+                    "new_docs": new_docs_count,
                 "total_unique": len(all_documents),
                 "max_llm_score": max_llm_score
             }
@@ -1333,9 +1333,186 @@ class IterativeDocumentRetriever:
             else:
                 failed_iterations_count = 0  # Сбрасываем если нашли новые документы
         
-        # Конвертируем в список и сортируем по score
-        final_docs = list(all_documents.values())
-        final_docs.sort(key=lambda x: x.score, reverse=True)
+        # Финальная валидация для проверки полноты (ВСЕГДА выполняется)
+        all_docs_list = list(all_documents.values())
+        all_docs_list.sort(key=lambda x: x.score, reverse=True)
+        logger.info(f"🔍 Performing FINAL validation on {len(all_docs_list)} documents...")
+        
+        final_validation = await self.validator.validate_documents_quality(
+            query=query,
+            documents=all_docs_list[:30],
+            max_llm_score=self._get_max_llm_score(all_documents)
+        )
+        
+        final_missing_aspects = final_validation.get('missing_aspects', [])
+        final_found_aspects = final_validation.get('found_aspects', [])
+        final_requested_aspects = final_validation.get('requested_aspects', [])
+        
+        logger.info(f"📊 FINAL validation result:")
+        logger.info(f"   Requested: {final_requested_aspects}")
+        logger.info(f"   Found: {final_found_aspects}")
+        logger.info(f"   Missing: {final_missing_aspects}")
+        
+        # Сохраняем документы которые были ДО поиска дополнительных чанков
+        docs_before_additional = set(all_documents.keys())
+        
+        # Если есть missing_aspects, пробуем найти дополнительные чанки из тех же документов
+        if final_missing_aspects:
+            logger.info(f"🔍 Missing aspects after all iterations: {final_missing_aspects}")
+            logger.info(f"🔎 Trying to find additional chunks from existing documents...")
+            
+            # Собираем file_names из найденных документов (из ВСЕХ документов для лучшего покрытия)
+            found_file_names = set()
+            for doc in all_docs_list[:15]:  # Берем больше документов
+                if doc.metadata:
+                    file_name = doc.metadata.get("file_name", "")
+                    if file_name:
+                        found_file_names.add(file_name)
+            
+            if found_file_names:
+                logger.info(f"📁 Found documents from files: {list(found_file_names)[:5]}...")
+                # Генерируем запрос для поиска недостающих аспектов
+                for missing_aspect in final_missing_aspects[:2]:  # Пробуем максимум 2 аспекта
+                    try:
+                        aspect_query = await self.query_rephraser._generate_query_for_aspect(query, missing_aspect)
+                        logger.info(f"🔎 Searching for '{missing_aspect}' in existing documents with query: {aspect_query}")
+                        
+                        # Ищем дополнительные чанки через базовый поиск
+                        # Используем _retrieve_documents_base для поиска
+                        # Увеличиваем top_k для более полного поиска
+                        additional_docs = await self.base_retriever._retrieve_documents_base(
+                            query=aspect_query,
+                            top_k=30,  # Увеличили с 20 до 30 для более полного поиска
+                            score_threshold=0.15,  # Еще более низкий порог чтобы найти больше
+                            document_ids=None
+                        )
+                        
+                        # Получаем документы из результатов
+                        if additional_docs:
+                            additional_docs_full = additional_docs
+                            logger.info(f"🔍 Found {len(additional_docs_full)} documents from search for '{missing_aspect}'")
+                            
+                            # Проверяем что это чанки из тех же файлов
+                            new_chunks_count = 0
+                            skipped_count = 0
+                            file_names_found = set()
+                            for additional_doc in additional_docs_full:
+                                if not isinstance(additional_doc, RetrievedDocument):
+                                    continue
+                                    
+                                doc_id = additional_doc.doc_id
+                                doc_metadata = additional_doc.metadata or {}
+                                doc_file_name = doc_metadata.get("file_name", "")
+                                doc_content = additional_doc.content or ""
+                                doc_page = doc_metadata.get("page_label", "N/A")
+                                
+                                if doc_file_name:
+                                    file_names_found.add(doc_file_name)
+                                
+                                # Если это чанк из известного файла
+                                if doc_file_name in found_file_names and doc_id:
+                                    # Проверяем - это новый doc_id или тот же но мы его обновляем если score лучше
+                                    is_new_doc = doc_id not in all_documents
+                                    existing_doc = all_documents.get(doc_id)
+                                    
+                                    # Добавляем если:
+                                    # 1. Это новый doc_id (новая страница), ИЛИ
+                                    # 2. Это тот же doc_id но найден через специальный поиск для missing_aspect (приоритет выше)
+                                    should_add = False
+                                    if is_new_doc:
+                                        should_add = True
+                                        logger.info(f"🔍 New chunk found: {doc_file_name} page {doc_page} (doc_id not in results)")
+                                    elif existing_doc:
+                                        # Если документ уже есть, но мы ищем недостающую информацию - добавляем если он релевантнее
+                                        # Проверяем наличие информации об искомом аспекте в новом документе
+                                        content_lower = doc_content.lower()
+                                        aspect_lower = missing_aspect.lower()
+                                        
+                                        # Если в новом чанке явно есть информация об аспекте, а в старом нет - заменяем
+                                        new_has_aspect = aspect_lower in content_lower or any(word in content_lower for word in aspect_lower.split() if len(word) > 3)
+                                        old_content = (existing_doc.content or "").lower()
+                                        old_has_aspect = aspect_lower in old_content or any(word in old_content for word in aspect_lower.split() if len(word) > 3)
+                                        
+                                        if new_has_aspect and not old_has_aspect:
+                                            should_add = True
+                                            logger.info(f"🔄 Better chunk found: {doc_file_name} page {doc_page} (has '{missing_aspect}' info)")
+                                        elif additional_doc.score > existing_doc.score + 0.1:
+                                            # Если score значительно лучше, тоже заменяем
+                                            should_add = True
+                                            logger.info(f"🔄 Higher score chunk: {doc_file_name} page {doc_page} (score {additional_doc.score:.3f} > {existing_doc.score:.3f})")
+                                    
+                                    if should_add:
+                                        # Даем высокий приоритет так как это важная информация которую ищут специально
+                                        additional_doc.score = max(additional_doc.score, 0.7)
+                                        # Убеждаемся что metadata сохранено
+                                        if not additional_doc.metadata:
+                                            additional_doc.metadata = doc_metadata
+                                        all_documents[doc_id] = additional_doc
+                                        new_chunks_count += 1
+                                        logger.info(f"✅ Added chunk from {doc_file_name} (page {doc_page}) for aspect '{missing_aspect}' with score {additional_doc.score:.3f}")
+                                    else:
+                                        # Логируем почему не добавили
+                                        if doc_file_name not in found_file_names:
+                                            logger.debug(f"⏭️ Skipped {doc_file_name}: not in found files")
+                                        elif not doc_id:
+                                            logger.debug(f"⏭️ Skipped: no doc_id")
+                                        elif existing_doc and not should_add:
+                                            logger.debug(f"⏭️ Skipped {doc_file_name} page {doc_page}: already have similar or better chunk")
+                            
+                            if new_chunks_count > 0:
+                                logger.info(f"✅ Added {new_chunks_count} additional chunks from existing documents")
+                            else:
+                                logger.warning(f"⚠️ No additional chunks added for '{missing_aspect}' from {len(additional_docs_full)} found documents")
+                                if file_names_found:
+                                    logger.info(f"📋 Files found in search: {list(file_names_found)[:5]}")
+                                    logger.info(f"📋 Files we're looking for: {list(found_file_names)[:5]}")
+                                    matching_files = file_names_found & found_file_names
+                                    if matching_files:
+                                        logger.info(f"✅ Matching files found: {list(matching_files)}")
+                                    else:
+                                        logger.warning(f"⚠️ No matching files! Search found different files than original documents")
+                    
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error searching for additional chunks for '{missing_aspect}': {e}")
+        
+        # После добавления дополнительных чанков, пересобираем список и пересортировываем
+        all_docs_list = list(all_documents.values())
+        
+        # Если были добавлены дополнительные чанки для missing_aspects, приоритизируем их
+        docs_for_missing = set()
+        try:
+            if final_missing_aspects and docs_before_additional:
+                # Находим документы которые были добавлены ПОСЛЕ финальной валидации
+                for doc_id, doc in all_documents.items():
+                    if doc_id not in docs_before_additional:
+                        # Это новый документ, добавленный для missing_aspects
+                        # Проверяем содержимое на наличие missing_aspects
+                        content_lower = (doc.content or "").lower()[:1000]  # Проверяем первые 1000 символов
+                        for missing in final_missing_aspects:
+                            aspect_words = missing.lower().split()
+                            # Проверяем наличие missing_aspect в контенте (семантически, не только точно)
+                            has_aspect = (
+                                missing.lower() in content_lower or
+                                any(word in content_lower for word in aspect_words if len(word) > 3)
+                            )
+                            
+                            if has_aspect:
+                                docs_for_missing.add(doc_id)
+                                # Повышаем score для гарантированного попадания в топ
+                                doc.score = max(doc.score, 0.88)
+                                logger.info(f"📈 Boosted score for doc {doc_id[:8]}... (contains '{missing}') to {doc.score:.3f}")
+                                break  # Переходим к следующему документу
+        
+                logger.info(f"📊 Prioritized {len(docs_for_missing)} documents containing missing aspects")
+        except NameError:
+            # Если docs_before_additional не определен, пропускаем приоритизацию
+            pass
+        
+        # Сортируем по score (документы с missing_aspects теперь имеют приоритет)
+        all_docs_list.sort(key=lambda x: x.score, reverse=True)
+        
+        # Конвертируем в список и сортируем по score (обновленный список)
+        final_docs = all_docs_list
         
         # Логируем детальную статистику
         final_max_llm = self._get_max_llm_score(all_documents)
@@ -1345,9 +1522,40 @@ class IterativeDocumentRetriever:
                        f"{stat['found_docs']} docs ({stat['new_docs']} new) | "
                        f"LLM: {stat['max_llm_score']:.1f}/10 | "
                        f"Query: {stat['query'][:60]}...")
-        logger.info(f"  📈 Final: {len(final_docs)} unique docs | Best LLM score: {final_max_llm:.1f}/10")
         
-        return final_docs[:top_k]
+        # Если были найдены дополнительные чанки с missing_aspects, увеличиваем количество возвращаемых документов
+        final_top_k = top_k
+        if final_missing_aspects and len(final_docs) > top_k:
+            # Если есть missing_aspects и мы добавили дополнительные чанки, возвращаем больше документов
+            final_top_k = min(len(final_docs), top_k * 3)  # Увеличили с *2 до *3
+            logger.info(f"📊 Found missing aspects, returning {final_top_k} documents (instead of {top_k}) to ensure completeness")
+        
+        # Гарантируем что документы с missing_aspects попадут в результаты
+        # Берем топ документов, но также добавляем все приоритетные документы
+        priority_docs = []
+        regular_docs = []
+        
+        # Убеждаемся что docs_for_missing определен
+        if 'docs_for_missing' not in locals():
+            docs_for_missing = set()
+        
+        for doc in final_docs:
+            if doc.doc_id in docs_for_missing:
+                priority_docs.append(doc)
+            else:
+                regular_docs.append(doc)
+        
+        # Комбинируем: сначала приоритетные, потом обычные
+        final_result = priority_docs + regular_docs
+        # Берем до final_top_k, но гарантируем что все priority_docs включены
+        final_result = final_result[:final_top_k]
+        
+        if priority_docs:
+            logger.info(f"✅ Included {len(priority_docs)} priority documents with missing aspects")
+        
+        logger.info(f"  📈 Final: {len(final_docs)} unique docs | Best LLM score: {final_max_llm:.1f}/10 | Returning {len(final_result)} docs")
+        
+        return final_result[:final_top_k]
     
     def _get_max_llm_score(self, documents_dict: Dict[str, RetrievedDocument]) -> float:
         """Получает максимальный LLM score из документов"""
@@ -1377,17 +1585,17 @@ class GenerateAnswerInteractor:
         """Initialize the interactor with necessary components"""
         self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.vector_store = QdrantVectorStore(
-            collection_name="documents",
+            collection_name=Collections.DOCUMENT_EMBEDDINGS,  # Используем правильную коллекцию
             url=f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
-            vector_size=768,
+            vector_size=3072,  # text-embedding-3-large dimension
         )
         self.doc_store = LanceDBDocumentStore()
-        self.embedding = FastEmbedEmbeddings()
+        self.embedding = OpenAIEmbeddings(model_name="text-embedding-3-large", api_key=settings.OPENAI_API_KEY)
         self.reranker = SimpleReranker(self.openai_client)
         self.citation_pipeline = CitationPipeline(self.openai_client)
         self.query_rephraser = QueryRephraser(self.openai_client)
         self.quality_validator = DocumentQualityValidator(self.openai_client)  # NEW: Quality validator
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-4o"
         self.max_tokens = 2000
         self.temperature = 0.3
         self.use_reranking = True
@@ -1485,10 +1693,11 @@ class GenerateAnswerInteractor:
             if self.use_semantic_search:
                 try:
                     logger.info(f"🔍 Step 1: Semantic search for: {query[:100]}...")
-                    query_embedding_docs = self.embedding.invoke(query)
+                    query_embedding_docs = await self.embedding.ainvoke(query)
                     if query_embedding_docs and getattr(query_embedding_docs[0], "embedding", None):
                         query_embedding = query_embedding_docs[0].embedding
-                        initial_k = top_k * 3 if self.use_keyword_search or self.use_reranking else top_k * 2
+                        # Увеличиваем поиск чтобы не потерять важные документы
+                        initial_k = max(top_k * 4, 50) if self.use_keyword_search or self.use_reranking else top_k * 3
                         embeddings, similarities, doc_ids = await self.vector_store.query(
                             embedding=query_embedding,
                             top_k=initial_k,
@@ -1512,7 +1721,8 @@ class GenerateAnswerInteractor:
             if self.use_keyword_search:
                 try:
                     logger.info(f"🔤 Step 2: LanceDB Full-Text Search...")
-                    initial_k = top_k * 3 if self.use_semantic_search or self.use_reranking else top_k * 2
+                    # Увеличиваем поиск чтобы не потерять важные документы
+                    initial_k = max(top_k * 4, 50) if self.use_semantic_search or self.use_reranking else top_k * 3
                     fts_results = await self.keyword_search_lancedb(query, top_k=initial_k, document_ids=document_ids)
                     if fts_results:
                         logger.info(f"✅ FTS found {len(fts_results)} documents")
@@ -1597,19 +1807,31 @@ class GenerateAnswerInteractor:
                 avg_keyword = sum(d.keyword_score for d in retrieved_docs) / len(retrieved_docs)
                 logger.info(f"✅ Hybrid scores: semantic={avg_semantic:.3f}, keyword={avg_keyword:.3f}")
             
-            # Apply score threshold
+            # Apply score threshold (более мягкий порог чтобы не потерять важные документы)
+            # Если документов много, берем хотя бы top_k * 2 даже если score ниже порога
             filtered_docs = [doc for doc in retrieved_docs if doc.score >= score_threshold]
+            if len(filtered_docs) < top_k:
+                # Если после фильтрации осталось мало документов, берем больше с более низким порогом
+                soft_threshold = max(0.1, score_threshold * 0.5)
+                filtered_docs = [doc for doc in retrieved_docs if doc.score >= soft_threshold]
+                logger.info(f"⚠️ Applying soft threshold {soft_threshold:.3f} to get more documents")
+            
             if not filtered_docs:
-                logger.warning(f"⚠️ No documents above threshold {score_threshold}")
-                filtered_docs = retrieved_docs[:top_k]
+                logger.warning(f"⚠️ No documents above threshold {score_threshold}, using top documents")
+                filtered_docs = retrieved_docs[:max(top_k * 2, 20)]
+            
             logger.info(f"✅ After filtering: {len(filtered_docs)} documents")
             
             # Step 5: LLM Reranking (if enabled)
             max_llm_score = 10.0
-            if self.use_reranking and len(filtered_docs) > top_k:
+            # Увеличиваем количество документов для reranking для лучшего покрытия
+            rerank_candidates = min(len(filtered_docs), max(top_k * 2, 30)) if self.use_reranking else top_k
+            if self.use_reranking:
+                # Берем больше документов для reranking (до 30)
+                docs_for_rerank = filtered_docs[:rerank_candidates]
                 try:
-                    logger.info(f"🔄 Step 3: LLM-based reranking (Kotaemon-style)...")
-                    reranked_docs, max_llm_score = await self.reranker.rerank(query, filtered_docs, top_k)
+                    logger.info(f"🔄 Step 3: LLM-based reranking (Kotaemon-style)... (evaluating {len(docs_for_rerank)} docs)")
+                    reranked_docs, max_llm_score = await self.reranker.rerank(query, docs_for_rerank, top_k)
                     logger.info(f"✅ Reranked to {len(reranked_docs)} documents | Max LLM score: {max_llm_score:.1f}/10")
                     filtered_docs = reranked_docs
                 except Exception as e:

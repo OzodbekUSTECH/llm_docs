@@ -25,7 +25,7 @@ async def init_qdrant_collection():
             await client.create_collection(
                 collection_name=Collections.DOCUMENT_EMBEDDINGS,
                 vectors_config=VectorParams(
-                    size=768,
+                    size=3072,
                     distance=Distance.COSINE,
                 ),
                 on_disk_payload=True,
@@ -40,7 +40,7 @@ async def init_qdrant_collection():
             await client.create_collection(
                 collection_name=Collections.RULES_EMBEDDINGS,
                 vectors_config=VectorParams(
-                    size=768,
+                    size=3072,
                     distance=Distance.COSINE,
                 ),
                 on_disk_payload=True,

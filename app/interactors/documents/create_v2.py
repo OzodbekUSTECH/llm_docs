@@ -37,7 +37,9 @@ from llama_index.core.text_splitter import TokenTextSplitter
 from llama_index.core.schema import TextNode
 from app.entities.indexes import Index
 from app.utils.vectors_store import QdrantVectorStore
-from app.utils.embeddings import FastEmbedEmbeddings
+from app.utils.embeddings import OpenAIEmbeddings
+from app.utils.collections import Collections
+from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
@@ -198,7 +200,7 @@ class CreateDocumentV2Interactor:
         self.storage_dir = Path("storage/documents")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.converter = converter
-        self.collection_name = "default"
+        self.collection_name = Collections.DOCUMENT_EMBEDDINGS  # Используем правильную коллекцию
         self.splitter = SimpleTokenSplitter(
             chunk_size=1024,
             chunk_overlap=256,
@@ -208,8 +210,11 @@ class CreateDocumentV2Interactor:
         
         self.docs_store = LanceDBDocumentStore()
         self.chunk_batch_size = 200
-        self.embedding = FastEmbedEmbeddings()
-        self.vector_store = QdrantVectorStore()
+        self.embedding = OpenAIEmbeddings(model_name="text-embedding-3-large", api_key=settings.OPENAI_API_KEY)
+        self.vector_store = QdrantVectorStore(
+            collection_name=self.collection_name,
+            vector_size=3072
+        )
                 
  
     async def stream(
@@ -449,7 +454,7 @@ class CreateDocumentV2Interactor:
             print(f"Creating embeddings for {len(table_chunks)} table chunks (should be whole tables)")
         
         print(f"Getting embeddings for {len(chunks)} nodes")
-        embeddings = self.embedding.invoke(chunks)
+        embeddings = await self.embedding.ainvoke(chunks)
         print("Adding embeddings to vector store")
         
         # Extract metadata from chunks

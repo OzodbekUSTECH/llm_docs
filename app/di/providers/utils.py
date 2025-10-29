@@ -47,7 +47,7 @@ class UtilsProvider(Provider):
     
     # Константы для единообразия
     EMBEDDING_MODEL = "intfloat/e5-base-v2"
-    EMBEDDING_DIMENSION = 768  # e5-base-v2 имеет 768 измерения
+    EMBEDDING_DIMENSION = 3072  # e5-base-v2 имеет 768 измерения
     MAX_CHUNK_TOKENS = 512  # Максимум токенов в чанке
     CHUNK_OVERLAP_TOKENS = 64  # Перекрытие для контекста
     
