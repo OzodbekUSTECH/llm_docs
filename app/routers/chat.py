@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 
 from app.dto.chat import GenerateAnswerRequest, GeneratedAnswerResponse
-from app.interactors.chat.generate import GenerateAnswerInteractor
+from app.interactors.chat.generate_new import GenerateOptimizedAnswerInteractor
 from app.services.chat_storage import chat_storage
 
 
@@ -21,7 +21,7 @@ router = APIRouter(
 )
 
 
-async def stream_generator(interactor: GenerateAnswerInteractor, message: str, chat_id: str, document_ids: Optional[List[str]] = None):
+async def stream_generator(interactor: GenerateOptimizedAnswerInteractor, message: str, chat_id: str, document_ids: Optional[List[str]] = None):
     """Generator for streaming response in SSE format"""
     try:
         # Debug: log document_ids
@@ -65,7 +65,7 @@ async def stream_generator(interactor: GenerateAnswerInteractor, message: str, c
 @router.post("/generate")
 async def generate_answer(
     request: GenerateAnswerRequest,
-    generate_answer_interactor: FromDishka[GenerateAnswerInteractor],
+    generate_answer_interactor: FromDishka[GenerateOptimizedAnswerInteractor],
     chat_id: str = Query(..., description="Chat ID"),
 ):
     """Generate answer using RAG with Qdrant vector search and OpenAI

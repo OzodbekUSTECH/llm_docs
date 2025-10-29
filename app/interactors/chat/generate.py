@@ -1232,8 +1232,8 @@ class IterativeDocumentRetriever:
                     missing_queries = await self.query_rephraser.analyze_and_find_missing_info(
                         original_query=query,
                         found_documents=list(all_documents.values())[:10],
-                        max_iterations=self.max_iterations
-                    )
+                max_iterations=self.max_iterations
+            )
                     if len(missing_queries) > 1:
                         query_idx = min(i - 2, len(missing_queries) - 2)
                         new_query = missing_queries[query_idx + 1]
@@ -1259,24 +1259,24 @@ class IterativeDocumentRetriever:
             logger.info(f"🔄 Strategy: {strategy} | Query: {new_query[:100]}...")
             
             # Выполняем поиск с новым запросом
-            new_docs = await self.base_retriever._retrieve_documents_base(
+                new_docs = await self.base_retriever._retrieve_documents_base(
                 query=new_query,
-                top_k=top_k,
-                score_threshold=score_threshold,
-                document_ids=document_ids
-            )
-            
-            # Подсчитываем новые документы
-            new_docs_count = 0
-            for doc in new_docs:
-                if doc.doc_id not in all_documents:
-                    all_documents[doc.doc_id] = doc
-                    new_docs_count += 1
-                else:
-                    # Обновляем score если новый документ имеет лучший score
-                    existing_doc = all_documents[doc.doc_id]
-                    if doc.score > existing_doc.score:
+                    top_k=top_k,
+                    score_threshold=score_threshold,
+                    document_ids=document_ids
+                )
+                
+                # Подсчитываем новые документы
+                new_docs_count = 0
+                for doc in new_docs:
+                    if doc.doc_id not in all_documents:
                         all_documents[doc.doc_id] = doc
+                        new_docs_count += 1
+                    else:
+                        # Обновляем score если новый документ имеет лучший score
+                        existing_doc = all_documents[doc.doc_id]
+                        if doc.score > existing_doc.score:
+                            all_documents[doc.doc_id] = doc
                 
             # Обновляем максимальный LLM score
             max_llm_score = self._get_max_llm_score(all_documents)

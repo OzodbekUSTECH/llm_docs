@@ -13,6 +13,7 @@ from app.entities.sources import Source
 from app.entities.indexes import Index
 from app.utils.docs_store import LanceDBDocumentStore
 from app.utils.vectors_store import QdrantVectorStore
+from app.utils.collections import Collections
 from app.utils.enums import IndexType
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,10 @@ class DeleteDocumentInteractor:
         self.indexes_repository = indexes_repository
         self.storage_dir = Path("storage/documents")
         self.docs_store = LanceDBDocumentStore()
-        self.vector_store = QdrantVectorStore()
+        self.vector_store = QdrantVectorStore(
+            collection_name=Collections.DOCUMENT_EMBEDDINGS,
+            vector_size=3072
+        )
     
     async def execute(self, source_id: str) -> DeleteDocumentResponse:
         """

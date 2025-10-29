@@ -5,7 +5,7 @@ from typing import Annotated, List, Dict, Any
 import json
 
 from app.dto.sources import GetSourcesParams, SourceResponse
-from app.interactors.documents.create_v2 import CreateDocumentV2Interactor
+from app.interactors.documents.create_new import CreateOptimizedDocumentInteractor
 from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
 from app.interactors.documents.get import (
@@ -25,7 +25,7 @@ router = APIRouter(
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_document(
-    create_document_interactor: FromDishka[CreateDocumentV2Interactor],
+    create_document_interactor: FromDishka[CreateOptimizedDocumentInteractor],
     file: UploadFile = File(...),
 ):
     async def generate():

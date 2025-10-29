@@ -3,14 +3,14 @@ from dishka import Provider, Scope, provide_all
 from app.interactors.documents.create import CreateDocumentInteractor
 from app.interactors.documents.delete import DeleteDocumentInteractor
 from app.interactors.documents.search import SearchDocumentsInteractor
-from app.interactors.chat.generate import GenerateAnswerInteractor
+from app.interactors.chat.generate_new import GenerateOptimizedAnswerInteractor
 from app.interactors.chat.openai_generate import OpenAIGenerateInteractor
 from app.interactors.documents.get import (
     GetAllDocumentsInteractor, 
     GetDocumentByIdInteractor,
     GetDocumentChunksInteractor
 )
-from app.interactors.documents.create_v2 import CreateDocumentV2Interactor
+from app.interactors.documents.create_new import CreateOptimizedDocumentInteractor
 
 
 class DocumentsInteractorProvider(Provider):
@@ -21,10 +21,10 @@ class DocumentsInteractorProvider(Provider):
         CreateDocumentInteractor,
         SearchDocumentsInteractor,
         DeleteDocumentInteractor,
-        GenerateAnswerInteractor,
+        GenerateOptimizedAnswerInteractor,
         OpenAIGenerateInteractor,
         GetAllDocumentsInteractor,
         GetDocumentByIdInteractor,
         GetDocumentChunksInteractor,
-        CreateDocumentV2Interactor,
+        CreateOptimizedDocumentInteractor,
     )
