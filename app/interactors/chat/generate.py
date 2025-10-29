@@ -740,6 +740,61 @@ Return ONLY a JSON object with format: {{"targeted_queries": ["query1", "query2"
         except Exception as e:
             logger.error(f"❌ Error generating targeted queries: {e}")
             return [original_query]
+    
+    async def _generate_query_for_aspect(
+        self,
+        original_query: str,
+        missing_aspect: str
+    ) -> str:
+        """
+        Генерирует точный поисковый запрос для конкретного недостающего аспекта.
+        Например, если missing_aspect="price", а original_query="chrome deal buyer seller",
+        генерирует "chrome deal price" или "chrome price terms"
+        """
+        try:
+            prompt = f"""Given the original user question and a missing aspect, generate a precise search query to find information about that specific aspect.
+
+Original Question: {original_query}
+Missing Aspect: {missing_aspect}
+
+Generate a search query that:
+1. Includes the main context from the original question (e.g., "chrome deal", "contract")
+2. Focuses specifically on finding the missing aspect (e.g., "price")
+3. Uses natural language that would match document content
+4. Keeps it concise (5-10 words max)
+
+Examples:
+- Original: "chrome deal buyer seller quality" + Missing: "price" → "chrome deal price"
+- Original: "information on contract" + Missing: "payment terms" → "contract payment terms"
+- Original: "Glencore agreement" + Missing: "delivery" → "Glencore delivery terms"
+
+Return ONLY the search query, nothing else:"""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at generating precise search queries for finding specific information in documents."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=50
+            )
+            
+            result = response.choices[0].message.content.strip()
+            # Убираем кавычки если есть
+            result = result.strip('"\'')
+            logger.info(f"✅ Generated aspect query: {result}")
+            return result
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating query for aspect '{missing_aspect}': {e}")
+            # Fallback
+            if "deal" in original_query.lower():
+                return f"{missing_aspect} chrome deal"
+            elif "contract" in original_query.lower():
+                return f"{missing_aspect} contract"
+            else:
+                return f"{original_query[:50]} {missing_aspect}"
 
 
 class DocumentQualityValidator:
@@ -785,15 +840,16 @@ class DocumentQualityValidator:
             
             docs_text = "\n\n".join(docs_content)
             
-            system_prompt = """You are a document quality validator. Your task is to analyze whether the provided documents contain sufficient information to answer the user's question.
+            system_prompt = """You are a STRICT document quality validator. Your task is to analyze whether the provided documents contain ALL aspects requested in the user's question.
 
-Evaluate:
-1. Do the documents contain relevant information to answer the question?
-2. How confident are you that the answer can be found in these documents? (0-10)
-3. What aspects of the question are missing or unclear in the documents?
-4. What should we do next? (continue searching / stop and answer / broaden search)
+IMPORTANT RULES:
+1. Extract ALL specific aspects/fields requested in the question (e.g., buyer, seller, price, quality, delivery terms, payment terms)
+2. Check if EACH aspect is present in the documents
+3. If ANY aspect is missing - list it in missing_aspects
+4. Recommendation should be "continue" if ANY aspect is missing, even if confidence is high
+5. Only recommend "stop" if ALL aspects are clearly present in the documents
 
-Be strict in your evaluation. If the documents don't clearly contain the answer, say so."""
+Be VERY STRICT. Missing even one requested aspect means we should continue searching."""
 
             user_prompt = f"""User's Question: {query}
 
@@ -802,16 +858,21 @@ Top Retrieved Documents:
 
 Maximum LLM relevance score from all documents: {max_llm_score:.1f}/10
 
-Please evaluate:
-1. Do these documents contain the answer to the question?
-2. Your confidence level (0-10) that we can answer based on these documents
-3. What specific aspects are missing (if any)?
-4. Recommendation: "continue" (keep searching), "stop" (we have enough), "broaden" (try broader search)
+CRITICAL TASK:
+1. First, extract ALL specific aspects/fields requested in the question (e.g., if question asks for "buyer, seller, price, quality, delivery terms, payment terms" - extract all 6)
+2. Check if EACH aspect is present in the documents above
+3. List ALL missing aspects in missing_aspects array
+4. Confidence should reflect completeness (lower if aspects missing)
+5. Recommendation MUST be "continue" if ANY aspect is missing, even if confidence is 8-10
+
+Example: If question asks for "buyer, seller, price, quality" and documents only have buyer, seller, quality → missing_aspects=["price"], recommendation="continue"
 
 Return ONLY JSON: {{
     "has_answer": true/false,
     "confidence": 0-10,
     "missing_aspects": ["aspect1", "aspect2"],
+    "requested_aspects": ["aspect1", "aspect2", "aspect3"],
+    "found_aspects": ["aspect1"],
     "recommendation": "continue/stop/broaden",
     "reasoning": "brief explanation"
 }}"""
@@ -930,12 +991,24 @@ class IterativeDocumentRetriever:
             max_llm_score=max_llm_score
         )
         
+        missing_aspects = validation.get('missing_aspects', [])
+        requested_aspects = validation.get('requested_aspects', [])
+        found_aspects = validation.get('found_aspects', [])
+        
         logger.info(f"📊 Quality validation: confidence={validation.get('confidence', 0):.1f}/10, "
                    f"recommendation={validation.get('recommendation')}")
         
-        # Если уже есть хороший ответ - останавливаемся
-        if validation.get('confidence', 0) >= self.high_confidence_threshold:
-            logger.info(f"✅ High confidence achieved! Stopping search.")
+        if missing_aspects:
+            logger.warning(f"⚠️ Missing aspects detected: {missing_aspects}")
+            if requested_aspects:
+                logger.info(f"📋 Requested: {requested_aspects} | Found: {found_aspects} | Missing: {missing_aspects}")
+        
+        # КРИТИЧНО: Не останавливаемся если есть missing_aspects, даже при высокой confidence!
+        if missing_aspects:
+            logger.info(f"🔄 Missing aspects found: {missing_aspects}. Will continue searching despite confidence={validation.get('confidence', 0):.1f}/10")
+        elif validation.get('confidence', 0) >= self.high_confidence_threshold:
+            # Останавливаемся только если НЕТ missing_aspects И confidence высокая
+            logger.info(f"✅ High confidence ({validation.get('confidence', 0):.1f}/10) AND no missing aspects! Stopping search.")
             final_docs = list(all_documents.values())
             final_docs.sort(key=lambda x: x.score, reverse=True)
             return final_docs[:top_k]
@@ -952,68 +1025,106 @@ class IterativeDocumentRetriever:
             # Определяем стратегию поиска на основе текущего состояния
             current_max_llm = self._get_max_llm_score(all_documents)
             recommendation = validation.get('recommendation', 'continue')
+            missing_aspects = validation.get('missing_aspects', [])
             
-            # Выбираем стратегию поиска на основе текущего состояния
-            if recommendation == "broaden" or (current_max_llm < 3.0 and "broad" not in used_search_strategies):
-                # Стратегия 1: Широкий поиск
-                logger.info(f"🔍 Iteration {i}: Using BROAD search strategy...")
-                new_query = await self._generate_broad_query(query, all_documents)
-                strategy = "broad"
-                score_threshold = max(0.1, score_threshold * 0.5)  # Агрессивно снижаем порог
-            
-            elif current_max_llm < 4.0 and "targeted" not in used_search_strategies:
-                # Стратегия 2: Таргетированный поиск на основе сущностей (НОВАЯ СТРАТЕГИЯ)
-                logger.info(f"🔍 Iteration {i}: Using TARGETED search with entity extraction...")
-                entities = await self.query_rephraser.extract_key_entities(query)
-                targeted_queries = await self.query_rephraser.generate_targeted_queries(
-                    original_query=query,
-                    entities=entities,
-                    max_queries=3
-                )
-                # Берем первый таргетированный запрос
-                new_query = targeted_queries[0] if targeted_queries else query
-                strategy = "targeted"
-                score_threshold = max(0.2, score_threshold * 0.8)
-            
-            elif current_max_llm < 5.0 and "decomposed" not in used_search_strategies:
-                # Стратегия 3: Разбиение на подвопросы (НОВАЯ СТРАТЕГИЯ)
-                logger.info(f"🔍 Iteration {i}: Using DECOMPOSITION strategy...")
-                sub_queries = await self.query_rephraser.decompose_complex_query(query, max_subqueries=3)
-                # Берем первый подвопрос который еще не использовали
-                used_decomposed = len([s for s in iteration_stats if s.get('strategy') == 'decomposed'])
-                if used_decomposed < len(sub_queries):
-                    new_query = sub_queries[used_decomposed]
+            # ПРИОРИТЕТ 1: Поиск недостающих аспектов (САМАЯ ВАЖНАЯ СТРАТЕГИЯ!)
+            if missing_aspects:
+                # Считаем сколько раз уже использовали эту стратегию
+                missing_aspects_used = len([s for s in iteration_stats if s.get('strategy') == 'missing_aspects'])
+                
+                # Используем эту стратегию для каждого недостающего аспекта
+                if missing_aspects_used < len(missing_aspects):
+                    logger.info(f"🔍 Iteration {i}: Using MISSING ASPECTS search strategy...")
+                    logger.info(f"🎯 Searching for missing aspect #{missing_aspects_used + 1}: {missing_aspects[missing_aspects_used]}")
+                    
+                    # Берем следующий недостающий аспект
+                    current_missing = missing_aspects[missing_aspects_used]
+                    
+                    # Генерируем точный запрос для этого аспекта через LLM
+                    try:
+                        new_query = await self.query_rephraser._generate_query_for_aspect(query, current_missing)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error generating query for aspect: {e}, using fallback")
+                        # Fallback: простая комбинация
+                        if "deal" in query.lower():
+                            new_query = f"{current_missing} chrome deal"
+                        elif "contract" in query.lower():
+                            new_query = f"{current_missing} contract"
+                        else:
+                            context_words = [w for w in query.lower().split() if len(w) > 4][:3]
+                            context = " ".join(context_words) if context_words else query[:50]
+                            new_query = f"{context} {current_missing}"
+                    
+                    strategy = "missing_aspects"
+                    score_threshold = max(0.1, score_threshold * 0.5)  # Очень агрессивно снижаем порог
+                    logger.info(f"🔄 Generated targeted query for '{current_missing}': {new_query[:100]}...")
                 else:
-                    new_query = sub_queries[0] if sub_queries else query
-                strategy = "decomposed"
+                    # Все аспекты уже проверены, пропускаем эту стратегию и идем дальше
+                    missing_aspects = []  # Сбрасываем флаг
+                    strategy = None  # Будет установлен в следующем условии
             
-            elif current_max_llm < 6.0 and "missing_info" not in used_search_strategies:
-                # Стратегия 4: Поиск недостающей информации
-                logger.info(f"🔍 Iteration {i}: Analyzing missing information...")
-                missing_queries = await self.query_rephraser.analyze_and_find_missing_info(
-                    original_query=query,
-                    found_documents=list(all_documents.values())[:10],
-                    max_iterations=self.max_iterations
-                )
-                if len(missing_queries) > 1:
-                    query_idx = min(i - 2, len(missing_queries) - 2)
-                    new_query = missing_queries[query_idx + 1]
+            # Продолжаем выбор стратегии только если не выбрали missing_aspects
+            if not strategy:
+                if recommendation == "broaden" or (current_max_llm < 3.0 and "broad" not in used_search_strategies):
+                    # Стратегия 1: Широкий поиск
+                    logger.info(f"🔍 Iteration {i}: Using BROAD search strategy...")
+                    new_query = await self._generate_broad_query(query, all_documents)
+                    strategy = "broad"
+                    score_threshold = max(0.1, score_threshold * 0.5)  # Агрессивно снижаем порог
+                
+                elif current_max_llm < 4.0 and "targeted" not in used_search_strategies:
+                    # Стратегия 2: Таргетированный поиск на основе сущностей (НОВАЯ СТРАТЕГИЯ)
+                    logger.info(f"🔍 Iteration {i}: Using TARGETED search with entity extraction...")
+                    entities = await self.query_rephraser.extract_key_entities(query)
+                    targeted_queries = await self.query_rephraser.generate_targeted_queries(
+                        original_query=query,
+                        entities=entities,
+                        max_queries=3
+                    )
+                    # Берем первый таргетированный запрос
+                    new_query = targeted_queries[0] if targeted_queries else query
+                    strategy = "targeted"
+                    score_threshold = max(0.2, score_threshold * 0.8)
+                
+                elif current_max_llm < 5.0 and "decomposed" not in used_search_strategies:
+                    # Стратегия 3: Разбиение на подвопросы (НОВАЯ СТРАТЕГИЯ)
+                    logger.info(f"🔍 Iteration {i}: Using DECOMPOSITION strategy...")
+                    sub_queries = await self.query_rephraser.decompose_complex_query(query, max_subqueries=3)
+                    # Берем первый подвопрос который еще не использовали
+                    used_decomposed = len([s for s in iteration_stats if s.get('strategy') == 'decomposed'])
+                    if used_decomposed < len(sub_queries):
+                        new_query = sub_queries[used_decomposed]
+                    else:
+                        new_query = sub_queries[0] if sub_queries else query
+                    strategy = "decomposed"
+                
+                elif current_max_llm < 6.0 and "missing_info" not in used_search_strategies:
+                    # Стратегия 4: Поиск недостающей информации
+                    logger.info(f"🔍 Iteration {i}: Analyzing missing information...")
+                    missing_queries = await self.query_rephraser.analyze_and_find_missing_info(
+                        original_query=query,
+                        found_documents=list(all_documents.values())[:10],
+                        max_iterations=self.max_iterations
+                    )
+                    if len(missing_queries) > 1:
+                        query_idx = min(i - 2, len(missing_queries) - 2)
+                        new_query = missing_queries[query_idx + 1]
+                    else:
+                        new_query = query
+                    strategy = "missing_info"
+                
                 else:
-                    new_query = query
-                strategy = "missing_info"
-            
-            else:
-                # Стратегия 5: Простые вариации запроса (fallback)
-                logger.info(f"🔍 Iteration {i}: Generating query variations...")
-                variations = await self.query_rephraser._generate_simple_variations(query, max_iterations=5)
-                # Берем вариацию которую еще не использовали
-                used_count = len([s for s in iteration_stats if s.get('strategy') == 'variation'])
-                if used_count < len(variations):
-                    new_query = variations[min(used_count, len(variations)-1)]
-                else:
-                    logger.info(f"⚠️ All strategies exhausted, stopping...")
-                    break
-                strategy = "variation"
+                    # Стратегия 5: Простые вариации запроса (fallback)
+                    logger.info(f"🔍 Iteration {i}: Generating query variations...")
+                    variations = await self.query_rephraser._generate_simple_variations(query, max_iterations=5)
+                    # Берем вариацию которую еще не использовали
+                    used_count = len([s for s in iteration_stats if s.get('strategy') == 'variation'])
+                    if used_count < len(variations):
+                        new_query = variations[min(used_count, len(variations)-1)]
+                    else:
+                        logger.info(f"⚠️ All strategies exhausted, stopping...")
+                        break
+                    strategy = "variation"
             
             used_search_strategies.add(strategy)
             
@@ -1064,11 +1175,19 @@ class IterativeDocumentRetriever:
                 )
                 
                 confidence = validation.get('confidence', 0)
+                missing_aspects = validation.get('missing_aspects', [])
+                requested_aspects = validation.get('requested_aspects', [])
+                found_aspects = validation.get('found_aspects', [])
+                
                 logger.info(f"📊 Validation after iteration {i}: confidence={confidence:.1f}/10")
                 
-                # Если достигнута высокая уверенность - останавливаемся
-                if confidence >= self.high_confidence_threshold:
-                    logger.info(f"✅ HIGH CONFIDENCE ACHIEVED ({confidence:.1f}/10)! Stopping search.")
+                if missing_aspects:
+                    logger.warning(f"⚠️ Still missing aspects after iteration {i}: {missing_aspects}")
+                    if requested_aspects:
+                        logger.info(f"📋 Requested: {requested_aspects} | Found: {found_aspects} | Missing: {missing_aspects}")
+                elif confidence >= self.high_confidence_threshold:
+                    # Останавливаемся только если НЕТ missing_aspects И confidence высокая
+                    logger.info(f"✅ HIGH CONFIDENCE ({confidence:.1f}/10) AND NO MISSING ASPECTS! Stopping search.")
                     break
             
             # Обновляем счетчик неудачных итераций
