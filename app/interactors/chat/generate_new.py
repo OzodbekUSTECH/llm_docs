@@ -285,6 +285,8 @@ class GenerateOptimizedAnswerInteractor:
         self.temperature = 0.3
         self.top_k: int = 10
         self.first_round_top_k_mult: int = 10  # Retrieve 10x initially, then rerank
+        self.max_total_retrieved: int = 30
+        self.num_reformulations: int = 3
 
     async def _hybrid_search(
         self,
@@ -501,8 +503,54 @@ class GenerateOptimizedAnswerInteractor:
             reranked_docs = await self.reranker.rerank(
                 documents=retrieved_docs,
                 query=message,
-                top_k=top_k
+                top_k=top_k,
+                return_all=True,
             )
+
+            # Step 2b: Iterative refinement – generate reformulations and search again
+            merged_docs: List[RetrievedDocument] = list(reranked_docs)
+            seen_ids = {doc.doc_id for doc in merged_docs if doc.doc_id}
+
+            reformulations = await self._generate_reformulations(message, merged_docs)
+            if reformulations:
+                yield DocumentSchema(
+                    content=f"🔁 Refining query with {len(reformulations)} reformulation(s) to cover gaps...",
+                    channel="debug",
+                )
+
+            for i, reformulated in enumerate(reformulations, 1):
+                if len(merged_docs) >= self.max_total_retrieved:
+                    break
+                try:
+                    yield DocumentSchema(
+                        content=f"🔎 Iteration {i}: searching for complementary evidence...",
+                        channel="debug",
+                    )
+                    iter_docs = await self._hybrid_search(
+                        query=reformulated,
+                        top_k=top_k,
+                        document_ids=document_ids,
+                    )
+                    iter_reranked = await self.reranker.rerank(
+                        documents=iter_docs,
+                        query=reformulated,
+                        top_k=top_k,
+                        return_all=True,
+                    )
+                    # Merge new docs by id, preserve order
+                    for d in iter_reranked:
+                        if d.doc_id and d.doc_id not in seen_ids:
+                            merged_docs.append(d)
+                            seen_ids.add(d.doc_id)
+                    yield DocumentSchema(
+                        content=f"➕ Added {len(seen_ids) - len({doc.doc_id for doc in reranked_docs if doc.doc_id})} new docs (total {len(merged_docs)})",
+                        channel="debug",
+                    )
+                except Exception as e:
+                    logger.warning(f"Refinement iteration failed: {e}")
+
+            # Use merged docs as final retrieved set
+            reranked_docs = merged_docs
 
             yield DocumentSchema(
                 content=f"✅ Reranked to {len(reranked_docs)} documents",
@@ -553,7 +601,7 @@ class GenerateOptimizedAnswerInteractor:
             # Format context
             context = "\n\n".join([
                 f"[{i+1}]{doc.content}"
-                for i, doc in enumerate(reranked_docs)
+                for i, doc in enumerate(reranked_docs[: self.max_total_retrieved])
             ])
 
             # Format history
@@ -732,6 +780,63 @@ Please answer the question using ONLY the information from the context above. Ci
                 content=f"I encountered an error while processing your request: {str(e)}",
                 channel="chat"
             )
+
+    async def _generate_reformulations(
+        self,
+        question: str,
+        docs: List[RetrievedDocument],
+        max_reformulations: Optional[int] = None,
+    ) -> List[str]:
+        """Use LLM to propose alternative phrasings to fill potential gaps.
+
+        Returns up to N reformulations that are diverse and focused on missing details.
+        """
+        try:
+            if max_reformulations is None:
+                max_reformulations = self.num_reformulations
+
+            context_preview = "\n\n".join([(d.content or "")[:400] for d in docs[:5]])
+            prompt = (
+                "You are refining a search query to cover information gaps.\n"
+                "Given the original user question and some retrieved snippets, propose up to "
+                f"{max_reformulations} diverse, short reformulations that could retrieve complementary evidence.\n"
+                "- Keep each reformulation concise (<= 18 words).\n"
+                "- Vary phrasing and include plausible synonyms or explicit entities/dates/units from context.\n"
+                "- Output as a JSON array of strings only.\n\n"
+                f"Question: {question}\n\nSnippets:\n{context_preview}\n\nJSON:"
+            )
+            resp = await self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300,
+            )
+            text = resp.choices[0].message.content or ""
+            import json as _json
+            candidates = []
+            try:
+                candidates = _json.loads(text)
+            except Exception:
+                # Fallback: split by newline or semicolon
+                candidates = [s.strip(" -•\n") for s in text.split("\n") if s.strip()]
+
+            # Normalize and cap
+            unique: List[str] = []
+            seen = set()
+            for r in candidates:
+                r_norm = (r or "").strip()
+                if not r_norm:
+                    continue
+                if r_norm.lower() in seen:
+                    continue
+                seen.add(r_norm.lower())
+                unique.append(r_norm)
+                if len(unique) >= max_reformulations:
+                    break
+            return unique
+        except Exception as e:
+            logger.warning(f"Failed to generate reformulations: {e}")
+            return []
 
     async def execute(
         self,
