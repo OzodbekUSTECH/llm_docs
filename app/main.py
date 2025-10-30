@@ -19,9 +19,10 @@ from app.core.config import settings
 from app.routers.registry import register_routers
 
 
-
+from agents import set_default_openai_key
 configure_logging(level=settings.LOG_LEVEL)
 
+set_default_openai_key(settings.OPENAI_API_KEY)
 
 def create_app():
     app = FastAPI(

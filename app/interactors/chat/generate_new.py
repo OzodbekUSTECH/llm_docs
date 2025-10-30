@@ -284,8 +284,8 @@ class GenerateOptimizedAnswerInteractor:
         self.max_tokens = 2000
         self.temperature = 0.3
         self.top_k: int = 10
-        self.first_round_top_k_mult: int = 10  # Retrieve 10x initially, then rerank
-        self.max_total_retrieved: int = 30
+        self.first_round_top_k_mult: int = 15  # Retrieve 15x initially, then rerank (better recall)
+        self.max_total_retrieved: int = 60
         self.num_reformulations: int = 3
 
     async def _hybrid_search(
@@ -442,7 +442,10 @@ class GenerateOptimizedAnswerInteractor:
                 # Keyword-only document
                 combined_docs[doc_id] = doc
 
-        result = list(combined_docs.values())
+        # Apply a light threshold to drop very weak matches
+        result = [d for d in combined_docs.values() if (d.score or 0) >= 0.15]
+        # Sort by combined score desc for downstream filling
+        result.sort(key=lambda x: x.score, reverse=True)
 
         logger.info(f"✅ Hybrid search: {len(vs_docs)} from vector, {len(ds_docs)} from keyword, {len(result)} total (with score combination)")
 
@@ -507,11 +510,27 @@ class GenerateOptimizedAnswerInteractor:
                 return_all=True,
             )
 
+            # Ensure minimum doc count for answer context by topping up with high-scoring unre-ranked docs
+            min_docs_for_answer = min(self.max_total_retrieved, 25)
+            if len(reranked_docs) < min_docs_for_answer:
+                chosen_ids = {d.doc_id for d in reranked_docs if d.doc_id}
+                # retrieved_docs was sorted by combined score; add from it
+                for d in retrieved_docs:
+                    if len(reranked_docs) >= min_docs_for_answer:
+                        break
+                    if d.doc_id and d.doc_id in chosen_ids:
+                        continue
+                    reranked_docs.append(d)
+                    if d.doc_id:
+                        chosen_ids.add(d.doc_id)
+
             # Step 2b: Iterative refinement – generate reformulations and search again
             merged_docs: List[RetrievedDocument] = list(reranked_docs)
             seen_ids = {doc.doc_id for doc in merged_docs if doc.doc_id}
 
-            reformulations = await self._plan_gap_reformulations(message, merged_docs)
+            # Determine required fields dynamically from the question (no hardcoded labels)
+            req_fields = await self._extract_required_fields(message)
+            reformulations = await self._plan_gap_reformulations(message, merged_docs, required_fields=req_fields or None)
             if reformulations:
                 yield DocumentSchema(
                     content=f"🔁 Refining query with {len(reformulations)} reformulation(s) to cover gaps...",
@@ -549,8 +568,38 @@ class GenerateOptimizedAnswerInteractor:
                 except Exception as e:
                     logger.warning(f"Refinement iteration failed: {e}")
 
-            # Use merged docs as final retrieved set
+            # Use merged docs as current retrieved set
             reranked_docs = merged_docs
+
+            # Extra pre-answer gap fill: if gaps still suspected, try one more targeted round
+            more_reforms = await self._plan_gap_reformulations(message, reranked_docs, required_fields=req_fields or None)
+            if more_reforms:
+                yield DocumentSchema(
+                    content=f"🔁 Filling gaps before answering ({len(more_reforms)} targeted searches)...",
+                    channel="debug",
+                )
+                for reform in more_reforms:
+                    if len(reranked_docs) >= self.max_total_retrieved:
+                        break
+                    try:
+                        iter_docs = await self._hybrid_search(
+                            query=reform,
+                            top_k=top_k,
+                            document_ids=document_ids,
+                        )
+                        iter_reranked = await self.reranker.rerank(
+                            documents=iter_docs,
+                            query=reform,
+                            top_k=top_k,
+                            return_all=True,
+                        )
+                        existing_ids = {d.doc_id for d in reranked_docs if d.doc_id}
+                        for d in iter_reranked:
+                            if d.doc_id and d.doc_id not in existing_ids:
+                                reranked_docs.append(d)
+                                existing_ids.add(d.doc_id)
+                    except Exception as e:
+                        logger.warning(f"Pre-answer gap fill failed: {e}")
 
             yield DocumentSchema(
                 content=f"✅ Reranked to {len(reranked_docs)} documents",
@@ -658,6 +707,53 @@ Please answer the question using ONLY the information from the context above. Ci
                         content=content,
                         channel="chat"
                     )
+
+            # If answer still reports gaps, try one more targeted refinement and regenerate once
+            if any(kw in (full_response or "").lower() for kw in ["not specified", "not provided", "unspecified", "unknown"]):
+                extra_reforms = await self._plan_gap_reformulations(message, reranked_docs, required_fields=req_fields or None)
+                if extra_reforms:
+                    yield DocumentSchema(
+                        content="🔁 Detected missing fields in answer. Running one more targeted retrieval...",
+                        channel="debug",
+                    )
+                    try:
+                        existing_ids = {d.doc_id for d in reranked_docs if d.doc_id}
+                        for reform in extra_reforms:
+                            iter_docs = await self._hybrid_search(
+                                query=reform,
+                                top_k=top_k,
+                                document_ids=document_ids,
+                            )
+                            iter_reranked = await self.reranker.rerank(
+                                documents=iter_docs,
+                                query=reform,
+                                top_k=top_k,
+                                return_all=True,
+                            )
+                            for d in iter_reranked:
+                                if d.doc_id and d.doc_id not in existing_ids:
+                                    reranked_docs.append(d)
+                                    existing_ids.add(d.doc_id)
+
+                        # Regenerate answer with expanded context (single pass, not streamed to avoid duplicate noise)
+                        regen_context = "\n\n".join([
+                            f"[{i+1}]{doc.content}" for i, doc in enumerate(reranked_docs[: self.max_total_retrieved])
+                        ])
+                        regen_messages = [
+                            {"role": "system", "content": system_prompt},
+                            *formatted_history,
+                            {"role": "user", "content": user_prompt.replace(context, regen_context)},
+                        ]
+                        regen = await self.openai_client.chat.completions.create(
+                            model=self.model,
+                            messages=regen_messages,
+                            temperature=self.temperature,
+                            max_tokens=self.max_tokens,
+                        )
+                        full_response = regen.choices[0].message.content or full_response
+                        yield DocumentSchema(content="\n\n" + full_response, channel="chat")
+                    except Exception as e:
+                        logger.warning(f"Post-answer gap fill failed: {e}")
 
             # Step 4: Extract citations
             yield DocumentSchema(
@@ -842,31 +938,56 @@ Please answer the question using ONLY the information from the context above. Ci
         self,
         question: str,
         docs: List[RetrievedDocument],
+        required_fields: Optional[List[str]] = None,
     ) -> List[str]:
         """Detect gaps via lightweight heuristic, then optionally call LLM to propose targeted reformulations.
 
         Returns 0..N reformulations; empty list means no iteration needed.
         """
         # Heuristic: scan current docs for key field signals
-        text = "\n".join([(d.content or "")[:800] for d in docs[:20]]).lower()
-        signals = {
-            "price": any(k in text for k in [" usd", " eur", "$", "eur ", "usd ", "price", "unit price", "/mt", "per mt", "per dmt"]),
-            "payment": any(k in text for k in ["payment", "l/c", "letter of credit", "tt", "days", "upon presentation", "bank"]),
-            "buyer": any(k in text for k in ["buyer:", "buyer ", "purchaser", "consignee"]),
-            "seller": any(k in text for k in ["seller:", "seller ", "supplier"]),
-            "commodity": any(k in text for k in ["commodity", "product", "goods", "corn", "ore", "ulsd", "diesel"]),
-        }
-        missing = [k for k, v in signals.items() if not v]
-        if not missing:
+        text = "\n".join([(d.content or "")[:1200] for d in docs[:30]]).lower()
+        # Build dynamic signals: for each required field, mark present if its tokens occur in text
+        signals: Dict[str, bool] = {}
+        keys_scope = required_fields if required_fields else []
+        if keys_scope:
+            for field in keys_scope:
+                tokens = [t for t in (field or "").lower().split() if t]
+                present = False
+                if tokens:
+                    present = any(tok in text for tok in tokens)
+                signals[field] = present
+        else:
+            # If no required_fields provided, infer generic presence by density of numbers/currencies/dates
+            import re as _re
+            has_currency = bool(_re.search(r"(\$| eur| usd)\b", text))
+            has_numbers = len(_re.findall(r"\b\d+[\d.,/]*\b", text)) >= 5
+            has_entities = any(k in text for k in ["ltd", "sa", "corp", "limited", "company"])
+            signals = {"currency": has_currency, "numbers": has_numbers, "entities": has_entities}
+            keys_scope = list(signals.keys())
+        scoped_missing = [k for k in keys_scope if not signals.get(k, False)]
+        # Also consider coverage ratio: require at least 60% of scoped fields present
+        coverage_ratio_ok = sum(1 for k in keys_scope if signals.get(k, False)) >= max(1, int(0.6 * len(keys_scope)))
+        if not scoped_missing and coverage_ratio_ok:
             return []
 
         # Ask LLM for targeted reformulations for missing fields
         try:
+            # Try to extract contract identifiers from question or docs to target queries
+            import re as _re
+            ids_in_q = _re.findall(r"\b[A-Z]{2,}-\d{2,}[A-Z]?\b", question or "")
+            doc_text_join = "\n".join([(d.content or "")[:200] for d in docs[:20]])
+            ids_in_docs = _re.findall(r"\b[A-Z]{2,}-\d{2,}[A-Z]?\b", doc_text_join)
+            uniq_ids = []
+            for v in ids_in_q + ids_in_docs:
+                if v not in uniq_ids:
+                    uniq_ids.append(v)
+
             prompt = (
                 "You are improving a retrieval query to cover missing fields in contract extraction.\n"
                 f"Original question: {question}\n"
-                f"Missing fields: {', '.join(missing)}\n"
-                "Propose up to 3 short alternative queries that explicitly target these fields in contracts.\n"
+                f"Missing fields: {', '.join(scoped_missing)}\n"
+                + (f"Contract IDs to target (if useful): {', '.join(uniq_ids)}\n" if uniq_ids else "")
+                + "Propose up to 3 short alternative queries that explicitly target these fields in contracts.\n"
                 "Keep each <= 12 words. Return a JSON array of strings only."
             )
             resp = await self.openai_client.chat.completions.create(
@@ -899,6 +1020,48 @@ Please answer the question using ONLY the information from the context above. Ci
             return out
         except Exception as e:
             logger.warning(f"Gap planning failed, skipping iterations: {e}")
+            return []
+
+    async def _extract_required_fields(self, question: str) -> List[str]:
+        """LLM-driven extraction of attributes the user likely needs to answer their question.
+        Returns a short list of human-style attributes (no hardcoding).
+        """
+        try:
+            prompt = (
+                "From the following user request, list 3-6 short attribute labels that a person would look for to fully answer it.\n"
+                "Keep labels concise (e.g., 'contract number', 'buyer', 'seller', 'price', 'payment terms').\n"
+                "Return a JSON array of strings only.\n\nRequest:\n" + (question or "")
+            )
+            resp = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=160,
+            )
+            import json as _json
+            text = resp.choices[0].message.content or "[]"
+            attrs = []
+            try:
+                attrs = _json.loads(text)
+            except Exception:
+                attrs = [s.strip() for s in text.split("\n") if s.strip()]
+            # Normalize and cap
+            out: List[str] = []
+            seen = set()
+            for a in attrs:
+                a_norm = (a or "").strip()
+                if not a_norm:
+                    continue
+                key = a_norm.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(a_norm)
+                if len(out) >= 6:
+                    break
+            return out
+        except Exception as e:
+            logger.warning(f"Failed to extract required fields: {e}")
             return []
 
     async def execute(

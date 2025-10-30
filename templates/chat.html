@@ -1959,12 +1959,14 @@
                                                  const contentWithCursor = this.currentStreamingContent + '<span class="streaming-cursor">▊</span>';
                                                  streamingDiv.innerHTML = this.parseMarkdown(contentWithCursor);
                                                  
-                                                 // Restore debug container if it existed
-                                                 if (debugContainer) {
+                                            // Restore debug container if it existed
+                                            if (debugContainer) {
                                                      const messageContent = this.currentAssistantMessage.querySelector('.message-content');
                                                      if (messageContent && !messageContent.querySelector('.debug-section')) {
                                                          messageContent.insertBefore(debugContainer, messageContent.firstChild);
                                                      }
+                                                // Auto-collapse agent trace after final output
+                                                debugContainer.classList.add('collapsed');
                                                  }
                                                  
                                                  // Throttle code highlighting to improve performance
@@ -2919,7 +2921,7 @@
                     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
                         <div class="section-title">
                             <span class="section-icon">🔍</span>
-                            <span>Debug Information</span>
+                            <span>Agent Trace</span>
                         </div>
                         <span class="section-arrow">▼</span>
                     </div>
@@ -2936,10 +2938,70 @@
                 const messagesDiv = container.querySelector('.debug-messages');
                 if (!messagesDiv) return;
                 
-                const msgElement = document.createElement('div');
-                msgElement.style.cssText = 'padding: 6px 12px; font-size: 13px; color: #666; border-bottom: 1px solid #eee;';
-                msgElement.textContent = message;
-                messagesDiv.appendChild(msgElement);
+                // Structured agent trace rendering
+                let parsed = null;
+                if (typeof message === 'string' && message.trim().startsWith('{')) {
+                    try { parsed = JSON.parse(message); } catch (e) { parsed = null; }
+                }
+
+                if (parsed && parsed.trace_type) {
+                    const card = document.createElement('div');
+                    card.className = 'trace-card';
+                    card.style.cssText = 'border:1px solid #eee;border-radius:8px;padding:8px 10px;margin:6px 0;background:#fafafa;';
+                    const header = document.createElement('div');
+                    header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+                    const badge = document.createElement('span');
+                    badge.style.cssText = 'font-size:11px;padding:2px 6px;border-radius:6px;background:#eef;color:#334;';
+                    badge.textContent = parsed.trace_type.toUpperCase();
+                    header.appendChild(badge);
+                    card.appendChild(header);
+
+                    const body = document.createElement('div');
+                    body.style.cssText = 'font-size:12px;color:#555;white-space:pre-wrap;';
+                    if (parsed.content) {
+                        body.textContent = parsed.content;
+                    } else if (parsed.tool || parsed.args) {
+                        const pre = document.createElement('pre');
+                        pre.style.cssText = 'white-space:pre-wrap;margin:0;';
+                        pre.textContent = JSON.stringify({ tool: parsed.tool, args: parsed.args }, null, 2);
+                        body.appendChild(pre);
+                    } else if (parsed.result) {
+                        const pre = document.createElement('pre');
+                        pre.style.cssText = 'white-space:pre-wrap;margin:0;';
+                        pre.textContent = JSON.stringify(parsed.result, null, 2);
+                        body.appendChild(pre);
+                    } else if (parsed.reason) {
+                        body.textContent = `Reason: ${parsed.reason}`;
+                    }
+                    card.appendChild(body);
+                    messagesDiv.appendChild(card);
+                    return;
+                }
+
+                // Fallback: Render long messages as collapsible blocks
+                const isLong = typeof message === 'string' && message.length > 400;
+                if (isLong) {
+                    const details = document.createElement('details');
+                    details.open = false;
+                    details.style.cssText = 'border-bottom: 1px solid #eee; padding: 6px 12px;';
+
+                    const summary = document.createElement('summary');
+                    summary.style.cssText = 'font-size: 13px; color: #555; cursor: pointer;';
+                    summary.textContent = message.slice(0, 120) + '...';
+
+                    const pre = document.createElement('pre');
+                    pre.style.cssText = 'white-space: pre-wrap; font-size: 12px; color: #666; margin-top: 6px;';
+                    pre.textContent = message;
+
+                    details.appendChild(summary);
+                    details.appendChild(pre);
+                    messagesDiv.appendChild(details);
+                } else {
+                    const msgElement = document.createElement('div');
+                    msgElement.style.cssText = 'padding: 6px 12px; font-size: 13px; color: #666; border-bottom: 1px solid #eee;';
+                    msgElement.textContent = message;
+                    messagesDiv.appendChild(msgElement);
+                }
             }
             
             addDocumentInfo(content) {
