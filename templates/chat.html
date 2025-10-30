@@ -2943,16 +2943,29 @@
             }
             
             addDocumentInfo(content) {
-                // Parse document info from markdown content
-                // Expected format: **Document X**\n- **Final Score**: ...
+                // Prefer structured JSON from backend; fallback to markdown parsing
                 try {
-                    const docInfo = this.parseDocumentInfo(content);
+                    let docInfo = null;
+                    if (typeof content === 'string' && content.trim().startsWith('{')) {
+                        const data = JSON.parse(content);
+                        docInfo = {
+                            rank: data.rank,
+                            source: data.file_name,
+                            page: data.page,
+                            semanticScore: Number(data.semantic_score) || 0,
+                            keywordScore: Number(data.keyword_score) || 0,
+                            content: data.content || ''
+                        };
+                    } else {
+                        docInfo = this.parseDocumentInfo(content);
+                    }
+
                     if (docInfo) {
                         this.retrievedDocs.push(docInfo);
                         this.renderInfoPanel();
                     }
                 } catch (e) {
-                    console.error('Error parsing document info:', e);
+                    console.error('Error handling document info:', e);
                 }
             }
             
@@ -3027,43 +3040,13 @@
                     return;
                 }
                 
-                // Разделяем на with_citation и without_citation (Kotaemon-style)
-                const withCitation = [];
-                const withoutCitation = [];
-                
-                for (const doc of this.retrievedDocs) {
-                    const hasEvidence = this.citationHighlights[doc.rank] && this.citationHighlights[doc.rank].length > 0;
-                    if (hasEvidence) {
-                        withCitation.push(doc);
-            } else {
-                        withoutCitation.push(doc);
-                    }
-                }
-                
-                // Сортируем without_citation по LLM score (descending)
-                withoutCitation.sort((a, b) => (b.llmScore || 0) - (a.llmScore || 0));
-                
                 let html = '';
-                
-                // Сначала документы с цитатами (автоматически раскрыты)
-                if (withCitation.length > 0) {
-                    html += '<div class="docs-section with-citation">';
-                    html += '<div class="section-header">📌 Documents with Citations</div>';
-                    for (const doc of withCitation) {
-                        html += this.createDocCard(doc, true);  // true = открыт
-                    }
-                    html += '</div>';
+                html += '<div class="docs-section">';
+                html += '<div class="section-header">📄 Retrieved Chunks</div>';
+                for (const doc of this.retrievedDocs) {
+                    html += this.createDocCard(doc, false); // collapsed by default
                 }
-                
-                // Затем документы без цитат (закрыты по умолчанию)
-                if (withoutCitation.length > 0) {
-                    html += '<div class="docs-section without-citation">';
-                    html += '<div class="section-header">📄 Other Retrieved Documents</div>';
-                    for (const doc of withoutCitation) {
-                        html += this.createDocCard(doc, false);  // false = закрыт
-                    }
-                    html += '</div>';
-                }
+                html += '</div>';
                 
                 this.infoPanelContent.innerHTML = html;
             }
@@ -3071,75 +3054,46 @@
             createDocCard(doc, isOpen = false) {
                 const hasHybridScores = doc.semanticScore !== undefined && doc.keywordScore !== undefined;
                 const hasEvidences = this.citationHighlights[doc.rank] && this.citationHighlights[doc.rank].length > 0;
+                const headerLeft = `#${doc.rank || '?'} ${this.escapeHtml(doc.source || 'Unknown')}`;
                 
                 return `
                     <div class="doc-card ${isOpen ? 'open' : 'collapsed'}" data-doc-rank="${doc.rank || '?'}">
                         <div class="doc-card-header" onclick="window.chatApp.toggleDocCard(${doc.rank})">
                             <div class="doc-header-top">
-                                <div class="doc-rank">${hasEvidences ? '📌' : '📄'} #${doc.rank || '?'}</div>
+                                <div class="doc-rank" style="background: transparent; color: inherit; font-weight: 500;">${hasEvidences ? '📌' : '📄'} ${headerLeft}</div>
                                 <button class="doc-expand-btn" id="expand-btn-${doc.rank}">
                                     ${isOpen ? '▼' : '▶'}
                                 </button>
                             </div>
                             <div class="doc-scores">
                                 ${hasHybridScores ? `
-                                    <div class="doc-score-bar">
-                                        <span class="score-label">Semantic</span>
-                                        <div class="score-progress">
-                                            <div class="score-progress-fill semantic" style="width: ${(doc.semanticScore * 100).toFixed(1)}%"></div>
-                                        </div>
+                                    <div class="doc-score-bar" style="gap: 12px;">
+                                        <span class="score-label" style="min-width: unset;">Semantic:</span>
                                         <span class="score-value">${doc.semanticScore.toFixed(3)}</span>
-                                    </div>
-                                    <div class="doc-score-bar">
-                                        <span class="score-label">Keyword</span>
-                                        <div class="score-progress">
-                                            <div class="score-progress-fill keyword" style="width: ${(doc.keywordScore * 100).toFixed(1)}%"></div>
-                                        </div>
+                                        <span class="score-label" style="min-width: unset; margin-left: 10px;">• Keyword:</span>
                                         <span class="score-value">${doc.keywordScore.toFixed(3)}</span>
                                     </div>
                                 ` : ''}
-                                ${doc.llmScore !== undefined ? `
-                                    <div class="doc-score-bar">
-                                        <span class="score-label">🤖 LLM</span>
-                                        <div class="score-progress">
-                                            <div class="score-progress-fill llm" style="width: ${(doc.llmScore * 10).toFixed(1)}%"></div>
-                                        </div>
-                                        <span class="score-value">${doc.llmScore.toFixed(1)}/10</span>
-                                    </div>
-                                ` : ''}
-                                <div class="doc-score-bar">
-                                    <span class="score-label">Final</span>
-                                    <div class="score-progress">
-                                        <div class="score-progress-fill final" style="width: ${((doc.finalScore || 0) * 100).toFixed(1)}%"></div>
-                                    </div>
-                                    <span class="score-value">${(doc.finalScore || 0).toFixed(3)}</span>
-                                </div>
                             </div>
                         </div>
                         
-                        
                         <div class="doc-body" id="doc-body-${doc.rank}" style="display: ${isOpen ? 'block' : 'none'}">
-                            ${doc.source || doc.page ? `
+                            ${doc.page ? `
                                 <div class="doc-metadata">
-                                    ${doc.source ? `
-                                        <div class="metadata-row">
-                                            <span class="metadata-label">📄 File:</span>
-                                            <span class="metadata-value">${this.escapeHtml(doc.source)}</span>
-                                        </div>
-                                    ` : ''}
-                                    ${doc.page ? `
-                                        <div class="metadata-row">
-                                            <span class="metadata-label">📖 Page:</span>
-                                            <span class="metadata-value">${this.escapeHtml(doc.page)}</span>
-                                        </div>
-                                    ` : ''}
+                                    <div class="metadata-row">
+                                        <span class="metadata-label">📖 Page:</span>
+                                        <span class="metadata-value">${this.escapeHtml(doc.page)}</span>
+                                    </div>
                                 </div>
                             ` : ''}
                             
                             ${doc.content ? `
                                 <div class="doc-content-wrapper">
-                                    <div class="doc-content">
+                                    <div class="doc-content" id="doc-content-${doc.rank}">
                                         ${this.highlightEvidences(doc.content, doc.rank)}
+                                    </div>
+                                    <div style="margin-top:8px; text-align:right;">
+                                        <button class="doc-expand-btn" id="toggle-btn-${doc.rank}" onclick="event.stopPropagation(); window.chatApp.toggleDocContent(${doc.rank});">Show More ▼</button>
                                     </div>
                                 </div>
                             ` : ''}
@@ -3349,42 +3303,35 @@
                     return;
                 }
                 
-                // Скроллить к документу в info panel
+                // Скролл к карточке документа
                 this.infoPanelContent.scrollTo({
                     top: docCard.offsetTop - 20,
                     behavior: 'smooth'
                 });
                 
-                // Раскрыть документ если свернут (используем новую структуру)
-                if (docCard.classList.contains('collapsed')) {
+                // Раскрыть документ если свернут
+                const wasCollapsed = docCard.classList.contains('collapsed');
+                if (wasCollapsed) {
                     this.toggleDocCard(citationNumber);
                 }
                 
-                // Временно подсветить документ
-                docCard.classList.add('highlight-active');
+                // После раскрытия прокрутить к первому подсвеченному месту внутри контента
                 setTimeout(() => {
-                    docCard.classList.remove('highlight-active');
-                }, 2000);
+                    const highlights = docCard.querySelectorAll('.citation-highlight');
+                    if (highlights && highlights.length > 0) {
+                        const target = highlights[0];
+                        // Прокрутить контейнер info panel к конкретному месту внутри карточки
+                        const y = docCard.offsetTop + target.offsetTop - 60;
+                        this.infoPanelContent.scrollTo({ top: y, behavior: 'smooth' });
+                        // Пульсирующая анимация для фокусного места
+                        target.style.animation = 'pulse-highlight 1s ease-in-out 3';
+                        setTimeout(() => { target.style.animation = ''; }, 3000);
+                    }
+                }, wasCollapsed ? 500 : 100);
                 
-                // Подсветить evidences в документе
-                const evidences = this.citationHighlights[citationNumber];
-                if (evidences && evidences.length > 0) {
-                    console.log(`[CITATION] Found ${evidences.length} evidences to highlight:`, evidences);
-                    
-                    // Создаем временное дополнительное подсвечивание для evidences
-                    setTimeout(() => {
-                        const highlightSpans = docCard.querySelectorAll('.citation-highlight');
-                        highlightSpans.forEach((span, index) => {
-                            // Добавляем пульсирующую анимацию
-                            span.style.animation = 'pulse-highlight 1s ease-in-out 3';
-                            setTimeout(() => {
-                                span.style.animation = '';
-                            }, 3000);
-                        });
-                    }, 500); // Даем время на раскрытие документа
-                } else {
-                    console.log(`[CITATION] No evidences found for doc ${citationNumber}`);
-                }
+                // Временно подсветить карточку
+                docCard.classList.add('highlight-active');
+                setTimeout(() => { docCard.classList.remove('highlight-active'); }, 2000);
             }
 
             // Document Selector Methods

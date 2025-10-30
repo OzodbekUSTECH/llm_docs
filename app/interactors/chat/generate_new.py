@@ -495,20 +495,30 @@ class GenerateOptimizedAnswerInteractor:
                 channel="debug"
             )
             
-            # Show document information
+            # Show document information (send structured JSON with full content)
             for i, doc in enumerate(reranked_docs, 1):
-                doc_info = f"**Document {i}**\n"
-                doc_info += f"- **Score**: {doc.score:.3f}"
-                doc_info += f" (Semantic: {doc.semantic_score:.3f}, Keyword: {doc.keyword_score:.3f})\n"
-                if doc.metadata:
-                    file_name = doc.metadata.get("file_name", "Unknown")
-                    page = doc.metadata.get("page_label", "N/A")
-                    doc_info += f"- **Source**: {file_name}, Page: {page}\n"
-                doc_info += f"\n```\n{doc.content[:500]}\n```"
-                yield DocumentSchema(
-                    content=doc_info,
-                    channel="info"
-                )
+                try:
+                    import json as _json
+                    file_name = (doc.metadata or {}).get("file_name", "Unknown")
+                    page_label = (doc.metadata or {}).get("page_label", "N/A")
+                    payload = {
+                        "rank": i,
+                        "file_name": file_name,
+                        "page": page_label,
+                        "semantic_score": float(doc.semantic_score or 0.0),
+                        "keyword_score": float(doc.keyword_score or 0.0),
+                        "content": doc.content or "",
+                    }
+                    yield DocumentSchema(
+                        content=_json.dumps(payload),
+                        channel="info",
+                    )
+                except Exception:
+                    # Fallback to minimal text if JSON serialization fails
+                    yield DocumentSchema(
+                        content=f"Document {i} | {file_name} (p. {page_label})",
+                        channel="info",
+                    )
 
             # Step 3: Generate answer
             yield DocumentSchema(
@@ -593,6 +603,56 @@ Please answer the question using ONLY the information from the context above. Ci
                 question=message
             )
 
+            # Stream highlights to info panel by locating evidences in retrieved docs
+            if cite_evidence and cite_evidence.evidences:
+                evidences_by_doc: Dict[int, List[str]] = {}
+                
+                # Parse cited numbers from the final answer to prioritize mapping
+                import re as _re
+                cited_numbers: list[int] = []
+                try:
+                    cited_numbers = [int(n) for n in _re.findall(r"\[(\d+)\]", full_response)]
+                except Exception:
+                    cited_numbers = []
+                
+                for ev in cite_evidence.evidences:
+                    ev_lower = (ev or "").lower()
+                    matched_rank: Optional[int] = None
+                    
+                    # 1) Try match inside specifically cited docs first (keep order)
+                    for n in cited_numbers:
+                        if 1 <= n <= len(reranked_docs):
+                            doc_text = (reranked_docs[n - 1].content or "")
+                            lc = doc_text.lower()
+                            if ev_lower and ev_lower[:10] in lc and ev_lower in lc:
+                                matched_rank = n
+                                break
+                            if ev_lower and ev_lower in lc:
+                                matched_rank = n
+                                break
+                    # 2) Otherwise, match against any doc
+                    if matched_rank is None:
+                        for rank, doc in enumerate(reranked_docs, start=1):
+                            doc_text = (doc.content or "")
+                            lc = doc_text.lower()
+                            if ev_lower and ev_lower[:10] in lc and ev_lower in lc:
+                                matched_rank = rank
+                                break
+                            if ev_lower and ev_lower in lc:
+                                matched_rank = rank
+                                break
+                    
+                    if matched_rank is not None:
+                        evidences_by_doc.setdefault(matched_rank, []).append(ev)
+                        try:
+                            import json as _json
+                            highlight_payload = {"doc_rank": matched_rank, "evidence": ev}
+                            yield DocumentSchema(content=_json.dumps(highlight_payload), channel="highlight")
+                        except Exception:
+                            pass
+            else:
+                evidences_by_doc = {}
+
             # Step 5: Save to chat storage
             processing_time = time.time() - start_time
             
@@ -624,8 +684,9 @@ Please answer the question using ONLY the information from the context above. Ci
             assistant_metadata = {
                 "retrieved_docs": retrieved_docs_data,
                 "evidences": cite_evidence.evidences if cite_evidence else [],
+                "evidences_by_doc": evidences_by_doc,
                 "processing_time": processing_time,
-                "citations_count": len(cite_evidence.evidences) if cite_evidence else 0
+                "citations_count": len(cite_evidence.evidences) if cite_evidence else 0,
             }
 
             chat_storage.add_message(
