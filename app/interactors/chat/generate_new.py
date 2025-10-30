@@ -511,7 +511,7 @@ class GenerateOptimizedAnswerInteractor:
             merged_docs: List[RetrievedDocument] = list(reranked_docs)
             seen_ids = {doc.doc_id for doc in merged_docs if doc.doc_id}
 
-            reformulations = await self._generate_reformulations(message, merged_docs)
+            reformulations = await self._plan_gap_reformulations(message, merged_docs)
             if reformulations:
                 yield DocumentSchema(
                     content=f"🔁 Refining query with {len(reformulations)} reformulation(s) to cover gaps...",
@@ -836,6 +836,69 @@ Please answer the question using ONLY the information from the context above. Ci
             return unique
         except Exception as e:
             logger.warning(f"Failed to generate reformulations: {e}")
+            return []
+
+    async def _plan_gap_reformulations(
+        self,
+        question: str,
+        docs: List[RetrievedDocument],
+    ) -> List[str]:
+        """Detect gaps via lightweight heuristic, then optionally call LLM to propose targeted reformulations.
+
+        Returns 0..N reformulations; empty list means no iteration needed.
+        """
+        # Heuristic: scan current docs for key field signals
+        text = "\n".join([(d.content or "")[:800] for d in docs[:20]]).lower()
+        signals = {
+            "price": any(k in text for k in [" usd", " eur", "$", "eur ", "usd ", "price", "unit price", "/mt", "per mt", "per dmt"]),
+            "payment": any(k in text for k in ["payment", "l/c", "letter of credit", "tt", "days", "upon presentation", "bank"]),
+            "buyer": any(k in text for k in ["buyer:", "buyer ", "purchaser", "consignee"]),
+            "seller": any(k in text for k in ["seller:", "seller ", "supplier"]),
+            "commodity": any(k in text for k in ["commodity", "product", "goods", "corn", "ore", "ulsd", "diesel"]),
+        }
+        missing = [k for k, v in signals.items() if not v]
+        if not missing:
+            return []
+
+        # Ask LLM for targeted reformulations for missing fields
+        try:
+            prompt = (
+                "You are improving a retrieval query to cover missing fields in contract extraction.\n"
+                f"Original question: {question}\n"
+                f"Missing fields: {', '.join(missing)}\n"
+                "Propose up to 3 short alternative queries that explicitly target these fields in contracts.\n"
+                "Keep each <= 12 words. Return a JSON array of strings only."
+            )
+            resp = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=160,
+            )
+            import json as _json
+            text_resp = resp.choices[0].message.content or "[]"
+            reformulations = []
+            try:
+                reformulations = _json.loads(text_resp)
+            except Exception:
+                reformulations = [s.strip() for s in text_resp.split("\n") if s.strip()]
+            # Limit and dedupe
+            out: List[str] = []
+            seen = set()
+            for r in reformulations:
+                r_norm = (r or "").strip()
+                if not r_norm:
+                    continue
+                key = r_norm.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(r_norm)
+                if len(out) >= min(self.num_reformulations, 3):
+                    break
+            return out
+        except Exception as e:
+            logger.warning(f"Gap planning failed, skipping iterations: {e}")
             return []
 
     async def execute(
