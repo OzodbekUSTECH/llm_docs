@@ -52,17 +52,22 @@ return YES if the context is relevant to the question and NO if it isn't.
 >>>
 > Relevant (YES / NO):"""
 
-    def __init__(self, openai_client: AsyncOpenAI, model: str = "gpt-4o"):
+    def __init__(self, openai_client: AsyncOpenAI, model: str = "gpt-4o-mini"):
         self.client = openai_client
         self.model = model
         self.top_k: int = 10
         self.concurrent: bool = True
+        self.max_concurrency: int = 4
+        self.max_retries: int = 3
+        self.retry_backoff_s: float = 0.8
+        self._semaphore = asyncio.Semaphore(self.max_concurrency)
 
     async def rerank(
         self,
         documents: List[RetrievedDocument],
         query: str,
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        return_all: bool = False,
     ) -> List[RetrievedDocument]:
         """Filter down documents based on their relevance to the query."""
         if top_k is None:
@@ -73,31 +78,40 @@ return YES if the context is relevant to the question and NO if it isn't.
 
         # Limit documents for reranking (LLM calls can be expensive)
         # But be less aggressive - rerank more documents
-        docs_to_rerank = documents[:min(len(documents), top_k * 5)]
+        docs_to_rerank = documents[:min(len(documents), max(top_k * 4, 20))]
         
         logger.info(f"🔄 LLM Reranking: evaluating {len(docs_to_rerank)} documents...")
 
-        if self.concurrent:
-            # Parallel processing
-            tasks = []
-            for doc in docs_to_rerank:
-                prompt = self.RERANK_PROMPT_TEMPLATE.format(
-                    question=query,
-                    context=doc.content[:800] if len(doc.content) > 800 else doc.content  # More context for better evaluation
-                )
-                tasks.append(self._check_relevance(prompt))
-            
-            results = await asyncio.gather(*tasks)
-        else:
-            # Sequential processing
-            results = []
-            for doc in docs_to_rerank:
-                prompt = self.RERANK_PROMPT_TEMPLATE.format(
-                    question=query,
-                    context=doc.content[:800] if len(doc.content) > 800 else doc.content
-                )
-                result = await self._check_relevance(prompt)
-                results.append(result)
+        results: List[bool] = []
+        try:
+            if self.concurrent:
+                async def worker(doc: RetrievedDocument) -> bool:
+                    prompt = self.RERANK_PROMPT_TEMPLATE.format(
+                        question=query,
+                        context=(doc.content or "")[:700],
+                    )
+                    return await self._check_relevance(prompt)
+
+                # Use bounded concurrency
+                async def run_with_semaphore(doc: RetrievedDocument) -> bool:
+                    async with self._semaphore:
+                        return await worker(doc)
+
+                tasks = [run_with_semaphore(doc) for doc in docs_to_rerank]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Normalize exceptions to True (keep rather than drop) to avoid over-filtering on failures
+                results = [False if isinstance(r, Exception) else bool(r) for r in results]
+            else:
+                for doc in docs_to_rerank:
+                    prompt = self.RERANK_PROMPT_TEMPLATE.format(
+                        question=query,
+                        context=(doc.content or "")[:700],
+                    )
+                    res = await self._check_relevance(prompt)
+                    results.append(res)
+        except Exception as e:
+            logger.warning(f"LLM reranker failed, using heuristic fallback: {e}")
+            results = [((d.semantic_score or 0) * 0.7 + (d.keyword_score or 0) * 0.3) >= 0.3 for d in docs_to_rerank]
 
         # Filter relevant documents
         filtered_docs = [
@@ -121,26 +135,36 @@ return YES if the context is relevant to the question and NO if it isn't.
                        f"added {needed} high-scoring docs to reach {top_k}")
 
         logger.info(f"✅ LLM Reranking: {len(filtered_docs)} relevant documents (from {len(docs_to_rerank)})")
-        return filtered_docs[:top_k]
+        return filtered_docs if return_all else filtered_docs[:top_k]
 
     async def _check_relevance(self, prompt: str) -> bool:
         """Check if document is relevant using LLM"""
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a relevance classifier. Respond with ONLY YES or NO."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=10
-            )
-            
-            result_text = response.choices[0].message.content.strip().upper()
-            return "YES" in result_text or result_text.startswith("Y")
-        except Exception as e:
-            logger.error(f"❌ Error checking relevance: {e}")
-            return True  # Default to relevant if error
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a relevance classifier. Respond with ONLY YES or NO."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.0,
+                    max_tokens=5,
+                )
+                result_text = (response.choices[0].message.content or "").strip().upper()
+                return "YES" in result_text or result_text.startswith("Y")
+            except Exception as e:
+                msg = str(e)
+                is_429 = "429" in msg or "rate limit" in msg.lower()
+                if attempt >= self.max_retries or not is_429:
+                    logger.error(f"❌ Error checking relevance: {e}")
+                    # Fail open to avoid losing recall
+                    return True
+                # Exponential backoff with jitter
+                backoff = self.retry_backoff_s * (2 ** (attempt - 1))
+                jitter = min(1.0, backoff * 0.25)
+                await asyncio.sleep(backoff + (jitter))
 
 
 class CitationPipeline:
