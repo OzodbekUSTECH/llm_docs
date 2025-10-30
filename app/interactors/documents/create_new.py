@@ -238,8 +238,22 @@ class CreateOptimizedDocumentInteractor:
             channel="debug"
         )
 
-        # Load data with Docling
-        docs = self.load_data(file_path, extra_info)
+        # Load data with Docling in background thread to avoid blocking event loop
+        # Emit heartbeats while converting to keep client connection alive
+        convert_task = asyncio.create_task(asyncio.to_thread(self.load_data, file_path, extra_info))
+        last_heartbeat = time.time()
+        while not convert_task.done():
+            await asyncio.sleep(2)
+            now = time.time()
+            if now - last_heartbeat >= 6:
+                last_heartbeat = now
+                yield DocumentSchema(
+                    content="⏳ Still converting... this can take a while for large PDFs",
+                    channel="debug",
+                )
+
+        # Retrieve conversion result (raises if failed)
+        docs = await convert_task
 
         # Count document types
         text_count = sum(1 for doc in docs if doc.metadata.get("type") != "table")
@@ -343,8 +357,16 @@ class CreateOptimizedDocumentInteractor:
             batch = chunks[start_idx:start_idx + self.chunk_batch_size]
             
             # Add to vector store and doc store (Kotaemon pattern)
-            await self.add_to_vectorstore(batch, file_id)
-            await self.add_to_docstore(batch, file_id)
+            try:
+                await self.add_to_vectorstore(batch, file_id)
+            except Exception as e:
+                logger.exception("Embedding step failed; will continue with doc store: %s", e)
+                yield DocumentSchema(content=f"⚠️ Embedding batch failed: {e}", channel="debug")
+            try:
+                await self.add_to_docstore(batch, file_id)
+            except Exception as e:
+                logger.exception("Doc store step failed: %s", e)
+                yield DocumentSchema(content=f"⚠️ Doc store batch failed: {e}", channel="debug")
             
             processed += len(batch)
             yield DocumentSchema(
@@ -366,36 +388,48 @@ class CreateOptimizedDocumentInteractor:
             return
 
         logger.info(f"Getting embeddings for {len(docs)} documents")
-        
-        # Generate embeddings (returns list[DocumentWithEmbedding])
-        embeddings_result = await self.embedding.ainvoke(docs)
-        
-        if not embeddings_result:
-            logger.warning("No embeddings generated")
-            return
-        
-        # Map embeddings to documents
-        # Note: embeddings_result[i] corresponds to docs[i]
-        ids = [str(doc.doc_id) for doc in docs]
-        metadatas = [doc.metadata for doc in docs]
-        
-        logger.info(f"Adding {len(embeddings_result)} embeddings to vector store")
-        
-        # Add to Qdrant (vector_store.add accepts list[DocumentWithEmbedding])
-        await self.vector_store.add(
-            embeddings=embeddings_result,
-            metadatas=metadatas,
-            ids=ids
-        )
+
+        # Further split into safe sub-batches to avoid long hangs and large payloads
+        sub_batch_size = 32
+        start = 0
+        while start < len(docs):
+            sub_docs = docs[start : start + sub_batch_size]
+            start += sub_batch_size
+
+            # Generate embeddings (returns list[DocumentWithEmbedding]) with timeout guard
+            try:
+                embeddings_result = await asyncio.wait_for(
+                    self.embedding.ainvoke(sub_docs), timeout=90
+                )
+            except asyncio.TimeoutError:
+                logger.error("Embedding request timed out for sub-batch of size %d", len(sub_docs))
+                continue
+
+            if not embeddings_result:
+                logger.warning("No embeddings generated for sub-batch")
+                continue
+
+            # Map embeddings to documents
+            ids = [str(doc.doc_id) for doc in sub_docs]
+            metadatas = [doc.metadata for doc in sub_docs]
+
+            logger.info(f"Adding {len(embeddings_result)} embeddings to vector store")
+
+            # Add to Qdrant (vector_store.add accepts list[DocumentWithEmbedding])
+            await self.vector_store.add(
+                embeddings=embeddings_result,
+                metadatas=metadatas,
+                ids=ids,
+            )
 
         # Create index entries for vectors
         vector_indexes = []
-        for doc_id in ids:
+        for doc in docs:
             vector_indexes.append(
                 Index(
                     source_id=file_id,
-                    target_id=doc_id,
-                    relation_type=IndexType.VECTOR
+                    target_id=str(doc.doc_id),
+                    relation_type=IndexType.VECTOR,
                 )
             )
         if vector_indexes:

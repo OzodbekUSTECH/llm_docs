@@ -78,11 +78,19 @@ class OpenAIEmbeddings:
     def __init__(
         self,
         model_name: str = "text-embedding-3-large",
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        request_timeout_s: float = 60.0,
+        max_retries: int = 3,
+        retry_backoff_s: float = 1.5,
+        max_batch_size: int = 32,
     ):
         self.model_name = model_name
         self.client = AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY)
         self.embedding_dimension = 3072  # text-embedding-3-large dimension
+        self.request_timeout_s = request_timeout_s
+        self.max_retries = max_retries
+        self.retry_backoff_s = retry_backoff_s
+        self.max_batch_size = max_batch_size
 
     def prepare_input(
         self, text: str | list[str] | DocumentSchema | list[DocumentSchema]
@@ -107,32 +115,44 @@ class OpenAIEmbeddings:
     async def ainvoke(
         self, text: str | list[str] | DocumentSchema | list[DocumentSchema], *args, **kwargs
     ) -> list[DocumentWithEmbedding]:
-        """Generate embeddings using OpenAI API (async)"""
+        """Generate embeddings using OpenAI API (async) with batching, timeouts, and retries."""
         input_texts = self.prepare_input(text)
-        
         if not input_texts:
             return []
-        
-        try:
-            response = await self.client.embeddings.create(
-                model=self.model_name,
-                input=input_texts
-            )
-            
-            results = []
-            for i, embedding_data in enumerate(response.data):
-                embedding = embedding_data.embedding
-                # Создаем DocumentWithEmbedding для каждого результата
-                results.append(
-                    DocumentWithEmbedding(
-                        content=input_texts[i] if i < len(input_texts) else "",
-                        embedding=embedding
+
+        results: list[DocumentWithEmbedding] = []
+
+        # Process in sub-batches
+        for start in range(0, len(input_texts), self.max_batch_size):
+            batch = input_texts[start : start + self.max_batch_size]
+
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    response = await self.client.embeddings.create(
+                        model=self.model_name,
+                        input=batch,
+                        timeout=self.request_timeout_s,
                     )
-                )
-            
-            return results
-        except Exception as e:
-            raise Exception(f"Error generating OpenAI embeddings: {e}")
+
+                    for i, embedding_data in enumerate(response.data):
+                        embedding = embedding_data.embedding
+                        results.append(
+                            DocumentWithEmbedding(
+                                content=batch[i] if i < len(batch) else "",
+                                embedding=embedding,
+                            )
+                        )
+                    break
+                except Exception as e:
+                    if attempt >= self.max_retries:
+                        raise Exception(f"Error generating OpenAI embeddings after {attempt} attempts: {e}")
+                    # Exponential backoff
+                    import asyncio as _asyncio
+                    await _asyncio.sleep(self.retry_backoff_s * attempt)
+
+        return results
 
     def invoke(
         self, text: str | list[str] | DocumentSchema | list[DocumentSchema], *args, **kwargs
